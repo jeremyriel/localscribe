@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ app_name }}{% endblock %}</title>
+<link rel="icon" href="/static/icon/favicon.ico" sizes="any">
+<link rel="icon" href="/static/icon/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon/icon-180.png">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body data-token="{{ instance_token }}" data-port="{{ port }}">
+
+<header class="topbar">
+  <a class="brand" href="/">
+    <img src="/static/icon/icon.svg" alt="" width="30" height="30">
+    <span class="brand-text">
+      <strong>Local Scribe</strong>
+      <small>Offline transcription</small>
+    </span>
+  </a>
+
+  <nav class="nav">
+    <a href="/" class="{{ 'on' if request.url.path == '/' else '' }}">Projects</a>
+    <a href="/settings" class="{{ 'on' if request.url.path == '/settings' else '' }}">AI Settings</a>
+    <a href="/about" class="{{ 'on' if request.url.path == '/about' else '' }}">About</a>
+  </nav>
+
+  <div class="topbar-right">
+    {% if engine.offline_lock %}
+      <span class="lock-badge" title="All outbound network access is blocked in this process.">
+        Offline lock on
+      </span>
+    {% endif %}
+
+    <!-- Persistent AI status indicator, refreshed by the heartbeat. -->
+    <button type="button" id="engine-pill" class="pill pill-unknown"
+            title="Click for engine details" aria-live="polite">
+      <span class="dot"></span>
+      <span class="pill-text">
+        <span id="engine-state">Checking engine</span>
+        <small id="engine-detail">{{ engine.selected_model_label }}</small>
+      </span>
+    </button>
+
+    <button type="button" id="console-toggle" class="btn btn-quiet" aria-expanded="false">
+      Console
+      <span id="heartbeat-dot" class="hb" title="Heartbeat"></span>
+    </button>
+  </div>
+</header>
+
+<main class="page">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- Engine detail popover, populated from /api/status -->
+<div id="engine-panel" class="popover" hidden>
+  <h3>Transcription engine</h3>
+  <dl id="engine-facts"></dl>
+  <div class="popover-actions">
+    <button type="button" class="btn btn-small" data-engine-action="load">Load model now</button>
+    <button type="button" class="btn btn-small btn-quiet" data-engine-action="unload">Unload</button>
+    <a class="btn btn-small btn-quiet" href="/settings">Settings</a>
+  </div>
+</div>
+
+<!-- Live console -->
+<section id="console" class="console" hidden aria-label="Activity console">
+  <header class="console-head">
+    <h2>
+      Console
+      <span id="console-status" class="console-status">connecting</span>
+    </h2>
+    <div class="console-tools">
+      <label class="chk"><input type="checkbox" id="console-autoscroll" checked> Follow</label>
+      <label class="chk"><input type="checkbox" id="console-debug"> Show debug</label>
+      <select id="console-filter" aria-label="Minimum severity">
+        <option value="all">All messages</option>
+        <option value="info">Info and above</option>
+        <option value="warn">Warnings and errors</option>
+        <option value="stat">Statistics only</option>
+      </select>
+      <button type="button" class="btn btn-small btn-quiet" id="console-copy">Copy all</button>
+      <button type="button" class="btn btn-small btn-quiet" id="console-clear">Clear view</button>
+      <button type="button" class="btn btn-small btn-quiet" id="console-close">Hide</button>
+    </div>
+  </header>
+
+  <div id="console-meters" class="console-meters">
+    <div class="meter">
+      <span class="meter-label">Status</span>
+      <span class="meter-value" id="m-status">idle</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">Progress</span>
+      <span class="meter-value" id="m-progress">-</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">Time remaining</span>
+      <span class="meter-value" id="m-eta">-</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">Speed</span>
+      <span class="meter-value" id="m-rtf">-</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">Words/s</span>
+      <span class="meter-value" id="m-wps">-</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">Tokens/s</span>
+      <span class="meter-value" id="m-tps">-</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">Uptime</span>
+      <span class="meter-value" id="m-uptime">-</span>
+    </div>
+  </div>
+
+  <div class="console-bar"><div id="console-bar-fill"></div></div>
+  <ol id="console-log" class="console-log" tabindex="0"></ol>
+</section>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="/static/js/app.js"></script>
+<script src="/static/js/console.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

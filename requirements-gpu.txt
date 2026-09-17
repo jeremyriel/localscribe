@@ -1,0 +1,6 @@
+# Optional NVIDIA runtime libraries for CTranslate2 CUDA execution.
+# Installed on demand from AI Settings -> "Install GPU support".
+# CTranslate2 4.x requires cuBLAS 12 and cuDNN 9; shipping them via pip avoids
+# requiring a system-wide CUDA toolkit install.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

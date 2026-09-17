@@ -1,0 +1,40 @@
+# Line endings matter here: Local Scribe ships launchers for three platforms
+# and is developed on Windows, where git would otherwise rewrite everything to
+# CRLF on checkout. A shell script with CRLF endings fails on macOS and Linux
+# with "bad interpreter: /usr/bin/env sh^M: no such file or directory", so the
+# POSIX launchers are pinned to LF explicitly.
+
+# Default: let git normalise text in the repository, checkout native.
+* text=auto
+
+# POSIX shell scripts must always be LF, on every platform.
+*.sh          text eol=lf
+*.command     text eol=lf
+
+# Windows batch files must always be CRLF, or cmd.exe can mis-parse them.
+*.bat         text eol=crlf
+
+# Source and data files: normalise to LF in the repository.
+*.py          text eol=lf
+*.js          text eol=lf
+*.css         text eol=lf
+*.html        text eol=lf
+*.json        text eol=lf
+*.md          text eol=lf
+*.txt         text eol=lf
+*.svg         text eol=lf
+.gitignore    text eol=lf
+.gitattributes text eol=lf
+VERSION       text eol=lf
+
+# Binary assets: never touched.
+*.png         binary
+*.ico         binary
+*.icns        binary
+*.docx        binary
+*.lsproj      binary
+*.mp3         binary
+*.mp4         binary
+*.m4a         binary
+*.mkv         binary
+*.wav         binary

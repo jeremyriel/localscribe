@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ project.title }} - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="crumb"><a href="/">Projects</a> / {{ project.title }}</div>
+
+<div class="page-head">
+  <div class="grow">
+    <h1>{{ project.title }}</h1>
+    {% if project.description %}<p class="lede">{{ project.description }}</p>{% endif %}
+    <p class="small muted">
+      {{ stats.documents }} file{{ '' if stats.documents == 1 else 's' }}
+      {% if stats.duration %} &middot; {{ (stats.duration / 60)|round(1) }} minutes of audio{% endif %}
+      {% if stats.words %} &middot; {{ '{:,}'.format(stats.words) }} words transcribed{% endif %}
+      &middot; created {{ project.created[:10] }}
+    </p>
+  </div>
+  <div class="row">
+    <button type="button" class="btn" id="edit-meta-btn">Edit details</button>
+    <button type="button" class="btn" id="export-btn">Export project</button>
+    <button type="button" class="btn btn-danger" id="delete-project-btn">Delete</button>
+  </div>
+</div>
+
+<!-- Project metadata: explicit save, unlike the transcript editor's autosave -->
+<form class="card" id="meta-form" hidden>
+  <h2>Project details</h2>
+  <p class="card-note">
+    This metadata travels with the project when you export it, and is written
+    into the header of every transcript file.
+  </p>
+  <div class="field">
+    <label for="m-title">Title</label>
+    <input type="text" id="m-title" name="title" value="{{ project.title }}" required>
+  </div>
+  <div class="field">
+    <label for="m-desc">Description</label>
+    <textarea id="m-desc" name="description">{{ project.description }}</textarea>
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label for="m-pi">Principal investigator</label>
+      <input type="text" id="m-pi" name="principal_investigator"
+             value="{{ project.principal_investigator }}">
+    </div>
+    <div class="field">
+      <label for="m-irb">IRB protocol</label>
+      <input type="text" id="m-irb" name="irb_protocol" value="{{ project.irb_protocol }}">
+    </div>
+    <div class="field">
+      <label for="m-scheme">Participant ID scheme</label>
+      <input type="text" id="m-scheme" name="participant_scheme"
+             value="{{ project.participant_scheme }}" placeholder="e.g. P01, P02">
+    </div>
+  </div>
+  <div class="field">
+    <label for="m-tags">Tags</label>
+    <input type="text" id="m-tags" name="tags" value="{{ project.tags|join(', ') }}"
+           placeholder="Comma separated">
+  </div>
+  <div class="field">
+    <label for="m-glossary">Project glossary</label>
+    <textarea id="m-glossary" name="glossary" placeholder="Names, jargon, acronyms, place names - one list, plain text.">{{ project.glossary }}</textarea>
+    <p class="help">
+      Given to Whisper as prior context, which measurably improves the spelling
+      of proper nouns and technical terms. Leave blank to use the global
+      initial prompt from AI Settings instead.
+    </p>
+  </div>
+  <div class="field">
+    <label for="m-consent">Consent and handling notes</label>
+    <textarea id="m-consent" name="consent_notes"
+              placeholder="Anything about consent, retention, or data handling worth recording alongside the transcripts."></textarea>
+  </div>
+  <div class="row row-end">
+    <span class="save-state" id="meta-state"></span>
+    <button type="button" class="btn btn-quiet" id="meta-cancel">Cancel</button>
+    <button type="submit" class="btn btn-primary">Save details</button>
+  </div>
+</form>
+
+<!-- Upload -->
+<div class="card">
+  <h2>Add recordings</h2>
+  <div class="dropzone" id="dropzone">
+    <p><strong>Drop audio or video files here</strong></p>
+    <p>or <button type="button" class="btn btn-small" id="pick-files">choose files</button></p>
+    <input type="file" id="file-input" multiple hidden
+           accept="{{ accepted|join(',') }}">
+    <p class="formats">
+      Audio: wav, mp3, m4a, aac, flac, ogg, opus, wma, aiff, amr &middot;
+      Video: mp4, mov, mkv, avi, webm, wmv, flv, mpg, 3gp and more.
+      Audio is extracted from video automatically; originals are never modified.
+    </p>
+  </div>
+  <div class="progress" id="upload-progress" hidden><div></div></div>
+  <p class="small muted" id="upload-status"></p>
+</div>
+
+<!-- Files + the prominent Transcribe action -->
+<div class="card">
+  <div class="row" style="margin-bottom:.8rem">
+    <h2 style="margin:0">Recordings</h2>
+    <span class="badge" id="doc-count">{{ stats.documents }}</span>
+    <div class="spacer"></div>
+    <button type="button" class="btn btn-quiet btn-small" id="refresh-btn">Refresh</button>
+    <button type="button" class="btn btn-transcribe btn-big" id="transcribe-btn"
+      {% if not stats.pending and not stats.documents %}disabled{% endif %}>
+      Transcribe
+      {% if stats.pending %}<span class="badge badge-ok">{{ stats.pending }}</span>{% endif %}
+    </button>
+  </div>
+
+  <div id="queue-note" class="notice notice-info small" hidden></div>
+
+  <div class="table-wrap">
+    <table id="doc-table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Type</th>
+          <th class="num">Length</th>
+          <th class="num">Words</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="doc-rows"></tbody>
+    </table>
+  </div>
+
+  <div class="empty" id="no-docs" hidden>
+    <h3>No recordings yet</h3>
+    <p>Add audio or video files above, then press Transcribe.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.PROJECT = {
+    slug: {{ project.slug|tojson }},
+    documents: {{ documents|tojson }},
+    stats: {{ stats|tojson }},
+  };
+</script>
+<script src="/static/js/project.js"></script>
+{% endblock %}

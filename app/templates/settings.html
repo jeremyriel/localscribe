@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}AI Settings - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="grow">
+    <h1>AI Settings</h1>
+    <p class="lede">
+      Every transcription parameter Whisper accepts, with an explanation of what
+      it actually does. Defaults are sensible; change them when you have a
+      reason, and use Restore defaults if a change makes things worse.
+    </p>
+  </div>
+</div>
+
+<!-- Hardware and recommendation -->
+<div class="card">
+  <h2>This machine</h2>
+  <div class="grid grid-2">
+    <div>
+      <dl>
+        <dt>CPU</dt><dd>{{ catalog.hardware.cpu_cores }} logical cores</dd>
+        <dt>CPU precisions</dt><dd class="mono">{{ catalog.hardware.cpu_compute_types|join(', ') }}</dd>
+        <dt>GPU</dt>
+        <dd>
+          {% if catalog.hardware.gpus %}
+            {{ catalog.hardware.gpus|length }} &times; {{ catalog.hardware.gpus[0] }}
+          {% else %}none detected{% endif %}
+        </dd>
+        {% if catalog.hardware.driver_version %}
+        <dt>NVIDIA driver</dt><dd class="mono">{{ catalog.hardware.driver_version }}</dd>
+        {% endif %}
+        <dt>GPU usable</dt>
+        <dd>{% if catalog.hardware.cuda_usable %}yes{% else %}no - transcription runs on CPU{% endif %}</dd>
+      </dl>
+    </div>
+    <div>
+      <div class="notice notice-info">
+        <strong>Recommended: {{ catalog.recommendation.model }}
+          at {{ catalog.recommendation.compute_type }}
+          on {{ catalog.recommendation.device|upper }}</strong>
+        {{ catalog.recommendation.reason }}
+      </div>
+      {% if catalog.recommendation.alternatives %}
+      <ul class="small muted" style="margin:.6rem 0 0; padding-left:1.1rem">
+        {% for alt in catalog.recommendation.alternatives %}
+          <li><strong>{{ alt.model }}</strong> - {{ alt.when }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <div class="row" style="margin-top:.7rem">
+        <button type="button" class="btn btn-small" id="apply-rec"
+                data-model="{{ catalog.recommendation.model }}"
+                data-compute="{{ catalog.recommendation.compute_type }}"
+                data-device="{{ catalog.recommendation.device }}">
+          Use the recommendation
+        </button>
+        <button type="button" class="btn btn-small btn-quiet" id="recheck-hw">Re-check hardware</button>
+      </div>
+    </div>
+  </div>
+
+  {% for warning in catalog.hardware.warnings %}
+    <div class="notice notice-warn" style="margin-top:.8rem">
+      {{ warning }}
+      {% if 'cuDNN' in warning or 'cuBLAS' in warning %}
+      <div class="row" style="margin-top:.6rem">
+        <button type="button" class="btn btn-small" id="install-gpu">Install GPU support</button>
+      </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+  {% for note in catalog.hardware.notes %}
+    <div class="notice" style="margin-top:.8rem">{{ note }}</div>
+  {% endfor %}
+</div>
+
+<!-- Model catalogue -->
+<div class="card">
+  <h2>Models</h2>
+  <p class="card-note">
+    Weights are downloaded once into <code>models/</code> and then used
+    offline. The download is the only outbound request Local Scribe makes.
+  </p>
+
+  {% if values.offline_lock %}
+  <div class="notice notice-warn">
+    <strong>Offline lock is engaged</strong>
+    Downloads are blocked. Turn the lock off in the Privacy section below if you
+    need to fetch a model, then turn it back on.
+  </div>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table class="model-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Size</th>
+          <th>Speed</th>
+          <th>Languages</th>
+          <th>Suitability</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for model in catalog.models %}
+        <tr class="{{ 'rec' if model.recommended else '' }}" data-model="{{ model.key }}">
+          <td>
+            <div class="model-name">
+              {{ model.label }}
+              {% if model.recommended %}<span class="badge badge-run">recommended</span>{% endif %}
+              {% if values.model == model.key %}<span class="badge badge-ok">selected</span>{% endif %}
+            </div>
+            <div class="model-sub mono">{{ model.key }} &middot; {{ model.params }}</div>
+          </td>
+          <td class="small nowrap">
+            {{ model.download_mb }} MB
+            {% if model.downloaded %}<div class="badge badge-ok">on disk</div>{% endif %}
+          </td>
+          <td class="small">{{ model.speed }}</td>
+          <td class="small">{{ model.languages }}</td>
+          <td class="model-note">{{ model.suitability }}</td>
+          <td class="nowrap" style="text-align:right">
+            {% if model.downloaded %}
+              {% if values.model != model.key %}
+                <button type="button" class="btn btn-small" data-act="select" data-model="{{ model.key }}">Use</button>
+              {% endif %}
+              <button type="button" class="btn btn-small btn-quiet btn-danger"
+                      data-act="delete" data-model="{{ model.key }}">Delete</button>
+            {% else %}
+              <button type="button" class="btn btn-small btn-primary"
+                      data-act="download" data-model="{{ model.key }}"
+                      {% if values.offline_lock %}disabled title="Offline lock is engaged"{% endif %}>
+                Download
+              </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- The settings form itself, generated from the schema -->
+<form id="settings-form">
+  {% for group in schema %}
+  <details class="settings-group" {% if loop.index <= 2 %}open{% endif %}>
+    <summary>{{ group.title }}</summary>
+    <div class="settings-body">
+      <p class="settings-blurb">{{ group.blurb }}</p>
+
+      {% for field in group.fields %}
+      <div class="field" data-key="{{ field.key }}">
+        <label for="f-{{ field.key }}">{{ field.label }}</label>
+
+        {% if field.kind == 'bool' %}
+          <label class="chk">
+            <input type="checkbox" id="f-{{ field.key }}" name="{{ field.key }}"
+                   data-kind="bool" {% if values[field.key] %}checked{% endif %}>
+            <span class="small muted">enabled</span>
+          </label>
+
+        {% elif field.kind == 'slider' %}
+          <div class="slider-row">
+            <input type="range" id="f-{{ field.key }}" name="{{ field.key }}"
+                   data-kind="slider"
+                   min="{{ field.min }}" max="{{ field.max }}" step="{{ field.step }}"
+                   value="{{ values[field.key] }}">
+            <output class="slider-val" for="f-{{ field.key }}">{{ values[field.key] }}</output>
+          </div>
+
+        {% elif field.kind == 'number' %}
+          <input type="number" id="f-{{ field.key }}" name="{{ field.key }}"
+                 data-kind="number"
+                 min="{{ field.min }}" max="{{ field.max }}" step="{{ field.step }}"
+                 value="{{ values[field.key] }}">
+
+        {% elif field.kind == 'select' %}
+          <select id="f-{{ field.key }}" name="{{ field.key }}" data-kind="select">
+            {% for option in field.options %}
+              <option value="{{ option }}" {% if values[field.key] == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+
+        {% elif field.kind == 'model_select' %}
+          <select id="f-{{ field.key }}" name="{{ field.key }}" data-kind="select">
+            {% for model in catalog.models %}
+              <option value="{{ model.key }}" {% if values[field.key] == model.key %}selected{% endif %}>
+                {{ model.label }}{% if model.downloaded %} (on disk){% else %} - not downloaded{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+
+        {% elif field.kind == 'device_select' %}
+          <select id="f-{{ field.key }}" name="{{ field.key }}" data-kind="select">
+            <option value="auto" {% if values[field.key] == 'auto' %}selected{% endif %}>auto</option>
+            <option value="cpu" {% if values[field.key] == 'cpu' %}selected{% endif %}>cpu</option>
+            {% for index in range(catalog.hardware.gpus|length) %}
+              <option value="cuda:{{ index }}"
+                {% if values[field.key] == 'cuda:' ~ index %}selected{% endif %}
+                {% if not catalog.hardware.cuda_usable %}disabled{% endif %}>
+                cuda:{{ index }} - {{ catalog.hardware.gpus[index] }}{% if not catalog.hardware.cuda_usable %} (unavailable){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+
+        {% elif field.kind == 'multiselect' %}
+          <div class="row">
+            {% for option in field.options %}
+            <label class="chk">
+              <input type="checkbox" name="{{ field.key }}" value="{{ option }}"
+                     data-kind="multiselect"
+                     {% if option in values[field.key] %}checked{% endif %}>
+              .{{ option }}
+            </label>
+            {% endfor %}
+          </div>
+
+        {% elif field.kind == 'textarea' %}
+          <textarea id="f-{{ field.key }}" name="{{ field.key }}" data-kind="text"
+                    rows="3">{{ values[field.key] }}</textarea>
+
+        {% else %}
+          <input type="text" id="f-{{ field.key }}" name="{{ field.key }}"
+                 data-kind="text" value="{{ values[field.key] }}">
+        {% endif %}
+
+        {% if field.help %}<p class="help">{{ field.help }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+
+  <!-- Advanced raw parameter passthrough -->
+  <details class="settings-group">
+    <summary>Advanced: raw engine parameters</summary>
+    <div class="settings-body">
+      <p class="settings-blurb">
+        A JSON object merged directly into the call to faster-whisper's
+        <code>transcribe()</code>, applied after everything above. This exists
+        so a parameter that is not surfaced in this page never requires a code
+        change. Unknown keys will raise an error at transcription time, which
+        appears in the console.
+      </p>
+      <div class="field">
+        <label for="f-advanced">Parameters (JSON object)</label>
+        <textarea id="f-advanced" name="advanced_raw" data-kind="json" rows="6"
+                  class="mono" spellcheck="false">{{ advanced_raw }}</textarea>
+        <p class="help">
+          Example: <code>{"suppress_blank": true, "without_timestamps": false}</code>
+        </p>
+      </div>
+    </div>
+  </details>
+
+  <div class="sticky-actions">
+    <button type="submit" class="btn btn-primary">Save settings</button>
+    <span class="save-state" id="settings-state"></span>
+    <div class="spacer"></div>
+    <button type="button" class="btn btn-quiet btn-danger" id="reset-settings">Restore defaults</button>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>window.SETTINGS_VALUES = {{ values|tojson }};</script>
+<script src="/static/js/settings.js"></script>
+{% endblock %}

@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}About - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="grow">
+    <div class="row" style="gap:.9rem; align-items:center">
+      <img src="/static/icon/icon.svg" alt="" width="54" height="54">
+      <div>
+        <h1 style="margin-bottom:.15rem">Local Scribe</h1>
+        <p class="muted small" style="margin:0">
+          Offline transcription and transcript validation for research
+          &middot; version {{ version }}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Credits</h2>
+  <p>
+    Local Scribe was created by <strong>Jeremy Riel</strong> at the
+    <strong>UIC TRAILblazer Lab</strong>, University of Illinois Chicago.
+  </p>
+  <p class="small muted">
+    Built for researchers who work with human-subjects recordings that cannot
+    be uploaded to a commercial transcription service.
+  </p>
+</div>
+
+<div class="card">
+  <h2>What this application does</h2>
+  <p>
+    Local Scribe turns audio and video recordings into transcripts, and then
+    gives you a workbench for correcting them against the audio. The intended
+    workflow is four steps:
+  </p>
+  <ol>
+    <li>
+      <strong>Create a project</strong> for a study or interview wave, and
+      record its metadata: investigator, IRB protocol, participant scheme,
+      consent notes, and a glossary of names and jargon.
+    </li>
+    <li>
+      <strong>Add recordings</strong> in essentially any common audio or video
+      format. Audio is extracted from video automatically. Original files are
+      never modified.
+    </li>
+    <li>
+      <strong>Transcribe</strong> with OpenAI's Whisper models running on this
+      machine, watching detailed progress, throughput, and time estimates in
+      the console.
+    </li>
+    <li>
+      <strong>Validate and correct</strong> each transcript in a page of its
+      own, with the audio playable in the window, a clickable time ribbon, and
+      click-a-word-to-hear-it playback. When the human pass is done, press
+      Re-timestamp to bring the word timings and caption files back into
+      agreement with the corrected text, then export.
+    </li>
+  </ol>
+  <p>
+    Exports are written for both reading and further work: plain text and
+    Markdown for analysis and coding, Word (.docx) for circulation and review,
+    and timestamped WebVTT and SubRip caption files for video software.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Why this is safer for protected data</h2>
+
+  <div class="notice notice-ok">
+    <strong>Recordings and transcripts never leave this computer.</strong>
+    There is no cloud service, no API key, no user account, and no upload step.
+    Transcription happens in this process, on this machine's own CPU or GPU.
+  </div>
+
+  <div class="grid grid-2" style="margin-top:1rem">
+    <div>
+      <h3>No third-party services</h3>
+      <p class="small">
+        Commercial transcription tools send audio to a vendor's servers, where
+        it is processed and often retained. That is usually incompatible with
+        an IRB protocol covering identifiable human-subjects data. Local Scribe
+        removes the transfer entirely, so there is no vendor, no data
+        processing agreement to negotiate, and no third-party retention
+        question to answer.
+      </p>
+    </div>
+    <div>
+      <h3>No telemetry, no external assets</h3>
+      <p class="small">
+        This interface loads no fonts, scripts, stylesheets, or images from the
+        internet. Everything it renders is served from this application's own
+        folder. Nothing measures or reports your usage. You can confirm this by
+        viewing the page source: there are no external URLs in it.
+      </p>
+    </div>
+    <div>
+      <h3>One deliberate network request, then sealed</h3>
+      <p class="small">
+        Whisper's model weights have to come from somewhere, so AI Settings has
+        an explicit download action for them. That is the only outbound request
+        the application makes. Once the model is on disk, engaging the
+        <strong>offline lock</strong> blocks all non-loopback network access
+        inside this process at the socket level, so it cannot reach the network
+        even by mistake.
+      </p>
+      <p class="small">
+        Offline lock is currently
+        {% if engine.offline_lock %}
+          <span class="badge badge-ok">engaged</span>.
+        {% else %}
+          <span class="badge badge-warn">off</span>.
+          <a href="/settings">Engage it in AI Settings</a> once your models are
+          downloaded.
+        {% endif %}
+      </p>
+    </div>
+    <div>
+      <h3>Loopback only, isolated from other local apps</h3>
+      <p class="small">
+        The server binds <code>127.0.0.1</code> exclusively, so it is not
+        reachable from your network. It listens on a fixed, uncommon port and
+        refuses to move to another one, and it rejects requests originating
+        from any other local application, so several local tools can run side
+        by side without interfering with each other.
+      </p>
+    </div>
+    <div>
+      <h3>Plain files you control</h3>
+      <p class="small">
+        There is no database. Each project is a folder of JSON, media, and
+        exported documents, so you can inspect it, copy it to an encrypted
+        drive, back it up, or recover a transcript with a text editor. Deleting
+        a project deletes its files.
+      </p>
+    </div>
+    <div>
+      <h3>Provenance travels with the transcript</h3>
+      <p class="small">
+        Every export records the model used, the language, the review status,
+        and the project's investigator and protocol number, so a transcript
+        remains interpretable as a research record rather than as an anonymous
+        text file.
+      </p>
+    </div>
+  </div>
+
+  <div class="notice" style="margin-top:1rem">
+    <strong>What this does not do</strong>
+    Local Scribe reduces the data-transfer risk. It does not encrypt your disk,
+    manage access to this computer, or de-identify transcript content. Machine
+    transcripts also contain errors, including plausible-sounding ones, so a
+    human pass against the audio remains necessary before analysis or
+    quotation.
+  </div>
+</div>
+
+<div class="card">
+  <h2>How it works</h2>
+  <dl>
+    <dt>Transcription</dt>
+    <dd>
+      OpenAI Whisper weights executed by faster-whisper on the CTranslate2
+      runtime, with word-level timestamps and Silero voice-activity detection.
+    </dd>
+    <dt>Media handling</dt>
+    <dd>
+      PyAV, which bundles its own FFmpeg libraries, so no separate ffmpeg
+      installation is needed to read video containers.
+    </dd>
+    <dt>Re-timestamping</dt>
+    <dd>
+      After a human edit, word timings are re-derived by aligning the corrected
+      text against the model's original timed words and transferring timings
+      across that alignment. Unchanged text keeps its exact timings;
+      rewritten passages are distributed proportionally and reported in the
+      console for spot-checking.
+    </dd>
+    <dt>Interface</dt>
+    <dd>Python, FastAPI, and plain HTML, CSS, and JavaScript. No frameworks fetched from the internet.</dd>
+  </dl>
+</div>
+
+<div class="card">
+  <h2>This installation</h2>
+  <dl>
+    <dt>Version</dt><dd class="mono">{{ version }}</dd>
+    <dt>Address</dt><dd class="mono">http://127.0.0.1:{{ port }}</dd>
+    <dt>CPU</dt><dd>{{ hardware.cpu_cores }} logical cores</dd>
+    <dt>GPU</dt>
+    <dd>
+      {% if hardware.gpus %}
+        {{ hardware.gpus|length }} &times; {{ hardware.gpus[0] }}
+        {% if hardware.cuda_usable %}(in use){% else %}(unavailable - running on CPU){% endif %}
+      {% else %}none detected{% endif %}
+    </dd>
+    <dt>Models on disk</dt>
+    <dd>{% if models %}<span class="mono">{{ models|join(', ') }}</span>{% else %}none yet{% endif %}</dd>
+    <dt>Projects folder</dt><dd class="mono small">{{ paths.projects }}</dd>
+    <dt>Models folder</dt><dd class="mono small">{{ paths.models }}</dd>
+    <dt>Logs folder</dt><dd class="mono small">{{ paths.logs }}</dd>
+    <dt>Settings file</dt><dd class="mono small">{{ paths.settings }}</dd>
+  </dl>
+</div>
+
+<div class="card">
+  <h2>Licensing and attribution</h2>
+  <p class="small">
+    Whisper is released by OpenAI under the MIT licence. faster-whisper and
+    CTranslate2 are MIT licensed. PyAV is BSD licensed and links FFmpeg, which
+    is LGPL/GPL licensed depending on build. python-docx is MIT licensed.
+    Silero VAD is MIT licensed. Model weights are redistributed by their
+    respective publishers on the Hugging Face Hub under their own terms.
+  </p>
+  <p class="small muted">
+    Whisper transcription quality varies with recording conditions, accent, and
+    language. Published word error rates are measured on read speech and are
+    optimistic for field recordings of group conversation.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}{{ document.filename }} - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="crumb">
+  <a href="/">Projects</a> /
+  <a href="/project/{{ project.slug }}">{{ project.title }}</a> /
+  {{ document.filename }}
+</div>
+
+<div class="page-head">
+  <div class="grow">
+    <h1>{{ document.filename }}</h1>
+    <p class="small muted" id="doc-summary">
+      {% if info %}
+        {{ '{:,}'.format(info.words) }} words &middot;
+        {{ info.segments }} segments &middot;
+        {{ (document.duration or 0) | round | int // 60 }}m
+        {{ ((document.duration or 0) | round | int) % 60 }}s
+        {% if info.language %}&middot; {{ info.language }}{% endif %}
+        &middot; {{ info.model }}
+      {% endif %}
+    </p>
+  </div>
+</div>
+
+{% if not has_transcript %}
+  <div class="empty">
+    <h3>Not transcribed yet</h3>
+    <p>
+      {{ document.status_detail or 'This recording has not been transcribed.' }}
+    </p>
+    <a class="btn btn-primary" href="/project/{{ project.slug }}">Back to the project to transcribe it</a>
+  </div>
+{% else %}
+
+<div class="editor-layout">
+  <div>
+    <!-- Player and time ribbon -->
+    <div class="card player-card">
+      <audio id="audio" preload="metadata" controls
+             src="/media/{{ project.slug }}/{{ document.id }}"></audio>
+
+      <div class="player-row" style="margin-top:.5rem">
+        <div class="transport">
+          <button type="button" class="btn btn-small" id="btn-play">Play</button>
+          <button type="button" class="btn btn-small btn-quiet" id="btn-back">&minus;2s</button>
+          <button type="button" class="btn btn-small btn-quiet" id="btn-fwd">+2s</button>
+          <label class="chk" title="Loop the segment you are editing">
+            <input type="checkbox" id="loop-seg"> Loop segment
+          </label>
+          <label class="chk" title="Keep the transcript scrolled to the playing segment">
+            <input type="checkbox" id="follow-play" checked> Follow audio
+          </label>
+        </div>
+        <div class="spacer"></div>
+        <label class="small muted" for="rate">Speed</label>
+        <select id="rate" style="width:auto">
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+        <span class="time-readout" id="time-readout">00:00 / 00:00</span>
+      </div>
+
+      <div class="ribbon-wrap">
+        <canvas class="ribbon" id="ribbon" height="72"></canvas>
+      </div>
+      <p class="ribbon-hint">
+        Click anywhere on the ribbon to play from that point. Click any word in
+        the transcript to hear it again.
+        <kbd>Space</kbd> play/pause &middot;
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> 2s &middot;
+        <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> 5s &middot;
+        <kbd>Esc</kbd> leave the text field
+      </p>
+    </div>
+
+    <!-- Transcript -->
+    <div class="card">
+      <div class="row" style="margin-bottom:.6rem">
+        <h2 style="margin:0">Transcript</h2>
+        <span class="save-state" id="save-state">Saved</span>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-small btn-quiet" id="jump-low"
+                title="Jump to the next word the model was unsure about">
+          Next uncertain word
+        </button>
+      </div>
+
+      <div id="stale-warning" class="notice notice-warn" hidden>
+        <strong>Timings are out of date</strong>
+        <span id="stale-text"></span>
+        Press <strong>Re-timestamp</strong> to re-derive the word timings from
+        your corrected text and rewrite the caption files.
+      </div>
+
+      <div class="legend" style="margin-bottom:.7rem">
+        <span><span class="swatch" style="background:#fdf0d8;box-shadow:inset 0 -2px 0 #e6b455"></span>
+          low model confidence (below {{ (low_confidence * 100) | int }}%)</span>
+        <span><span class="swatch" style="background:var(--accent-soft)"></span> currently playing</span>
+        <span><span class="swatch" style="background:var(--warn-soft)"></span> edited, needs re-timestamping</span>
+      </div>
+
+      <div class="segments" id="segments"></div>
+    </div>
+  </div>
+
+  <!-- Side panel -->
+  <aside class="side-panel">
+    <div class="card">
+      <h3>Finish the review</h3>
+      <p class="small muted">
+        Corrections save automatically. When you have finished the human pass,
+        re-derive the timings so the caption files match your text.
+      </p>
+      <button type="button" class="btn btn-primary" id="retimestamp" style="width:100%">
+        Re-timestamp and rewrite captions
+      </button>
+      <p class="small muted" id="retimestamp-note" style="margin-top:.5rem">
+        {% if info and info.retimestamped_at %}
+          Last re-timestamped {{ info.retimestamped_at[:16].replace('T', ' ') }}.
+        {% else %}
+          Not re-timestamped yet.
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Download transcripts</h3>
+      <p class="small muted">
+        Files are written into this document's <code>outputs</code> folder and
+        regenerated whenever you re-timestamp or re-export.
+      </p>
+      <ul class="file-list" id="outputs">
+        {% for f in outputs %}
+        <li>
+          <span class="fmt">.{{ f.format }}</span>
+          <a href="/outputs/{{ project.slug }}/{{ document.id }}/{{ f.name }}" download>{{ f.name }}</a>
+          <span class="size">{{ (f.size_bytes / 1024) | round(1) }} KB</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="row" style="margin-top:.7rem">
+        <a class="btn btn-small"
+           href="/api/projects/{{ project.slug }}/documents/{{ document.id }}/download-all">
+          Download all as .zip
+        </a>
+        <button type="button" class="btn btn-small btn-quiet" id="reveal">Open folder</button>
+        <button type="button" class="btn btn-small btn-quiet" id="reexport">Re-export</button>
+      </div>
+      <p class="help">
+        To save copies elsewhere on your computer, use Download all and choose
+        the destination, or Open folder and copy them directly.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Document facts</h3>
+      <dl id="facts">
+        <dt>Status</dt><dd>{{ document.status }}</dd>
+        <dt>Source</dt><dd class="small">{{ document.media.container if document.media else '-' }}</dd>
+        {% if document.media and document.media.has_video %}
+        <dt>Video</dt><dd class="small">{{ document.media.video_codec }}
+          {{ document.media.width }}&times;{{ document.media.height }}</dd>
+        {% endif %}
+        <dt>Audio</dt>
+        <dd class="small">
+          {{ document.media.audio_codec if document.media else '-' }}
+          {% if document.media and document.media.sample_rate %}
+            {{ document.media.sample_rate }} Hz
+          {% endif %}
+        </dd>
+        <dt>Model</dt><dd class="small">{{ info.model if info }}</dd>
+        {% if document.stats %}
+        <dt>Processing</dt>
+        <dd class="small">
+          {{ document.stats.get('realtime_factor', '-') }}x realtime,
+          {{ document.stats.get('words_per_second', '-') }} words/s
+        </dd>
+        {% endif %}
+        <dt>Uncertain words</dt><dd id="fact-low">{{ info.low_confidence if info else 0 }}</dd>
+        <dt>Reviewed</dt><dd id="fact-reviewed">{{ 'yes' if info and info.human_edited else 'not yet' }}</dd>
+      </dl>
+    </div>
+
+    {% if revisions %}
+    <details class="card">
+      <summary><strong>Edit history</strong> ({{ revisions|length }})</summary>
+      <p class="small muted" style="margin-top:.6rem">
+        Each autosave keeps the previous version. Restoring replaces the current
+        transcript.
+      </p>
+      <ul class="file-list">
+        {% for r in revisions %}
+        <li>
+          <span class="small mono">{{ r.id }}</span>
+          <span class="size">
+            <button type="button" class="btn btn-small btn-quiet"
+                    data-restore="{{ r.id }}">Restore</button>
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </aside>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if has_transcript %}
+<script>
+  window.DOC = {
+    slug: {{ project.slug|tojson }},
+    id: {{ document.id|tojson }},
+    filename: {{ document.filename|tojson }},
+    lowConfidence: {{ low_confidence|tojson }},
+    transcript: {{ transcript|tojson }},
+  };
+</script>
+<script src="/static/js/editor.js"></script>
+{% endif %}
+{% endblock %}

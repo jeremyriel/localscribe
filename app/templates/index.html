@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Projects - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="grow">
+    <h1>Projects</h1>
+    <p class="lede">
+      A project holds the recordings for one study, interview wave, or data
+      collection. Create one, add audio or video files, and transcribe them
+      entirely on this machine.
+    </p>
+  </div>
+  <div class="row">
+    <button type="button" class="btn btn-primary" id="new-project-btn">New project</button>
+    <button type="button" class="btn" id="import-btn">Import project</button>
+    <input type="file" id="import-input" accept=".lsproj,.zip" hidden>
+  </div>
+</div>
+
+{% if not engine.model_downloaded %}
+<div class="notice notice-warn" style="margin-bottom:1rem">
+  <strong>No transcription model is downloaded yet</strong>
+  Local Scribe needs Whisper model weights on disk before it can transcribe
+  anything. This is a one-time download and the only outbound request the
+  application makes. <a href="/settings">Open AI Settings to download a model.</a>
+</div>
+{% endif %}
+
+{% for warning in engine.warnings %}
+<div class="notice notice-warn" style="margin-bottom:1rem">{{ warning }}</div>
+{% endfor %}
+
+<!-- New project form -->
+<form class="card" id="new-project" hidden>
+  <h2>New project</h2>
+  <div class="field">
+    <label for="np-title">Project title</label>
+    <input type="text" id="np-title" name="title" required
+           placeholder="e.g. Teacher interviews, wave 1">
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label for="np-pi">Principal investigator</label>
+      <input type="text" id="np-pi" name="principal_investigator" placeholder="Optional">
+    </div>
+    <div class="field">
+      <label for="np-irb">IRB protocol number</label>
+      <input type="text" id="np-irb" name="irb_protocol" placeholder="Optional">
+    </div>
+  </div>
+  <div class="field">
+    <label for="np-desc">Description</label>
+    <textarea id="np-desc" name="description"
+              placeholder="What this collection contains, and anything a colleague would need to know."></textarea>
+  </div>
+  <div class="row row-end">
+    <button type="button" class="btn btn-quiet" id="np-cancel">Cancel</button>
+    <button type="submit" class="btn btn-primary">Create project</button>
+  </div>
+</form>
+
+{% if projects %}
+<div class="proj-grid" id="proj-grid">
+  {% for p in projects %}
+  <a class="proj-card" href="/project/{{ p.slug }}">
+    <h3>{{ p.title }}</h3>
+    {% if p.description %}
+      <div class="meta">{{ p.description[:150] }}{% if p.description|length > 150 %}...{% endif %}</div>
+    {% endif %}
+    {% if p.tags %}
+      <div class="tags">{% for t in p.tags %}<span class="badge">{{ t }}</span>{% endfor %}</div>
+    {% endif %}
+    <div class="facts">
+      <span><b>{{ p.stats.documents }}</b> file{{ '' if p.stats.documents == 1 else 's' }}</span>
+      {% if p.stats.words %}<span><b>{{ '{:,}'.format(p.stats.words) }}</b> words</span>{% endif %}
+      {% if p.stats.pending %}<span class="badge badge-warn">{{ p.stats.pending }} to do</span>{% endif %}
+      {% if p.stats.reviewed %}<span class="badge badge-ok">{{ p.stats.reviewed }} reviewed</span>{% endif %}
+    </div>
+    <div class="meta">Updated {{ p.updated[:16].replace('T', ' ') }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty" id="empty-state">
+  <h3>No projects yet</h3>
+  <p>Create a project to start transcribing. Everything stays in this folder on
+     your own computer.</p>
+  <button type="button" class="btn btn-primary" id="empty-new">Create your first project</button>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top:1.5rem">
+  <h3>How this protects your data</h3>
+  <p class="small muted">
+    Audio and transcripts never leave this computer. There is no cloud service,
+    no account, no telemetry, and no third-party asset loading in this
+    interface. Transcription runs locally with OpenAI's Whisper models. Once
+    your model is downloaded you can engage the offline lock in AI Settings,
+    which blocks all outbound network access at the process level.
+    <a href="/about">Read more about the data-security design.</a>
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/projects.js"></script>
+{% endblock %}

@@ -1,0 +1,45 @@
+# --- Research data: must never be committed ------------------------------
+# These hold human-subjects recordings, transcripts and exports. Everything a
+# project contains is protected data, so the whole tree stays out of version
+# control.
+projects/
+*.lsproj
+
+# Application logs contain transcript text as it is produced, so they are
+# inside the same protected-data boundary.
+logs/
+
+# --- Large downloaded artefacts ------------------------------------------
+# Whisper model weights: gigabytes, and re-downloadable from AI Settings.
+models/
+
+# --- Local environment and state -----------------------------------------
+.venv/
+.deps-hash
+
+# Development record: kept locally for context, deliberately not published.
+savestate.md
+
+# Per-installation settings. The app regenerates defaults when this is absent,
+# so a fresh clone starts correctly without it.
+settings.json
+settings.json.tmp
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- Editors and operating systems ---------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- Transient files ------------------------------------------------------
+*.part
+*.tmp
