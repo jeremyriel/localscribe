@@ -328,6 +328,97 @@ canvas.ribbon {
   font-variant-numeric: tabular-nums;
 }
 
+/* ------------------------------------------------------- speaker roster */
+
+.speaker-card .stepper {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--line); border-radius: var(--radius-s);
+  overflow: hidden; background: var(--surface);
+}
+.stepper button {
+  border: 0; background: var(--surface); cursor: pointer;
+  padding: .2rem .6rem; font: inherit; font-size: 1rem; color: var(--ink-2);
+}
+.stepper button:hover { background: var(--surface-2); }
+.stepper input {
+  width: 3rem; text-align: center; border: 0; border-left: 1px solid var(--line-2);
+  border-right: 1px solid var(--line-2); border-radius: 0;
+  font-variant-numeric: tabular-nums; padding: .2rem;
+}
+/* The number input's spin buttons duplicate the -/+ controls. */
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper input { -moz-appearance: textfield; appearance: textfield; }
+
+.speaker-rows { display: flex; flex-direction: column; gap: .4rem; }
+.speaker-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .35rem .5rem; border-radius: var(--radius-s);
+  border: 1px solid var(--line-2); background: var(--surface);
+  border-left: 4px solid var(--speaker-color, var(--line));
+}
+.swatch-btn {
+  width: 20px; height: 20px; flex: 0 0 auto; cursor: pointer;
+  border-radius: 50%; border: 1px solid rgba(0, 0, 0, .18);
+  background: var(--speaker-color, var(--ink-3));
+}
+.swatch-btn:hover { transform: scale(1.12); }
+.speaker-key {
+  font-family: var(--mono); font-size: .7rem; color: var(--ink-3);
+  min-width: .9rem; text-align: center;
+}
+.speaker-name { flex: 1 1 200px; min-width: 140px; }
+.speaker-short {
+  flex: 0 0 5.5rem; text-transform: uppercase; font-family: var(--mono);
+  font-size: .8rem; font-weight: 700; letter-spacing: .04em;
+  color: var(--speaker-color, var(--ink-2));
+}
+.speaker-turns { flex: 0 0 auto; min-width: 4.5rem; text-align: right; }
+
+/* Speaker tags on a turn. The acronym is always rendered as text, so colour
+   is a redundant cue rather than the only one (WCAG 1.4.1). */
+.chips { display: flex; gap: .25rem; flex-wrap: wrap; margin-left: auto; }
+.chip {
+  font-family: var(--mono); font-size: .68rem; font-weight: 700;
+  letter-spacing: .03em; padding: .12rem .45rem; cursor: pointer;
+  border-radius: 999px; background: var(--surface);
+  border: 1px solid var(--chip, var(--line)); color: var(--chip, var(--ink-2));
+}
+.chip:hover { background: var(--chip, var(--surface-2)); color: #fff; }
+.chip.on { background: var(--chip, var(--ink-2)); color: #fff; }
+.chip-clear { border-color: var(--line); color: var(--ink-3); }
+.chip-clear:hover { background: var(--surface-2); color: var(--ink-2); }
+
+/* ------------------------------------------------------------------ turns */
+
+.turn {
+  border-left: 3px solid var(--speaker-color, var(--line-2));
+  padding-left: .7rem; margin-bottom: .2rem;
+}
+.turn.tagged { border-left-width: 4px; }
+.turn-head {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .35rem 0 .2rem;
+}
+.turn-name {
+  font-weight: 700; font-size: .92rem; color: var(--speaker-color, var(--ink));
+}
+.turn-name.unassigned {
+  color: var(--ink-3); font-weight: 600; font-style: italic;
+}
+.turn + .turn { margin-top: .5rem; }
+
+/* A pause inside a turn: a visible break that deliberately does NOT reprint
+   the speaker's name, because nobody else has spoken. */
+.pause-marker {
+  display: flex; align-items: center; gap: .5rem;
+  margin: .35rem 0; color: var(--ink-3); font-size: .72rem;
+}
+.pause-marker::before, .pause-marker::after {
+  content: ""; height: 1px; background: var(--line-2); flex: 1 1 auto;
+}
+.pause-marker span { font-family: var(--mono); white-space: nowrap; }
+
 /* Segment list */
 .segments { display: flex; flex-direction: column; gap: .5rem; }
 .seg {
@@ -380,6 +471,82 @@ canvas.ribbon {
 .w.low { background: #fdf0d8; box-shadow: inset 0 -2px 0 #e6b455; }
 .w.playing { background: var(--accent); color: #fff; }
 .seg-text.editing .w { cursor: text; }
+
+/* ------------------------------------------------- find bar and squiggles */
+
+.findbar {
+  border: 1px solid var(--line); border-radius: var(--radius-s);
+  background: var(--surface-2); padding: .5rem .6rem; margin-bottom: .7rem;
+  display: flex; flex-direction: column; gap: .4rem;
+}
+.find-row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.find-row input[type=text] { flex: 1 1 200px; min-width: 150px; }
+.find-count {
+  font-family: var(--mono); font-size: .76rem; color: var(--ink-3);
+  min-width: 6rem; text-align: right; font-variant-numeric: tabular-nums;
+}
+.find-opts { font-size: .8rem; }
+.find-note { font-size: .76rem; color: var(--ink-3); }
+.find-note.bad { color: var(--error); }
+
+/* Match highlighting uses the Custom Highlight API, which paints over ranges
+   without touching the DOM. That is essential inside a contenteditable
+   transcript: wrapping matches in elements would move the caret and fight the
+   autosave on every keystroke. */
+::highlight(ls-find) {
+  background-color: #fde68a;
+  color: #1c2530;
+}
+::highlight(ls-find-current) {
+  background-color: #f59e0b;
+  color: #1c2530;
+}
+
+/* Word-processor squiggles. `skip-ink: none` keeps the wave continuous under
+   descenders, which is what makes it read as an underline rather than noise. */
+::highlight(ls-spell) {
+  text-decoration: underline wavy #c23b3b;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+::highlight(ls-artefact) {
+  text-decoration: underline wavy #1d5fa8;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
+.swatch-spell {
+  background: transparent;
+  border-bottom: 2px wavy var(--error);
+  text-decoration: underline wavy var(--error);
+  box-shadow: inset 0 -3px 0 -1px #c23b3b;
+}
+.swatch-artefact {
+  background: transparent;
+  box-shadow: inset 0 -3px 0 -1px #1d5fa8;
+}
+
+/* Suggestion menu on a flagged word */
+.proof-menu {
+  position: fixed; z-index: 95; min-width: 190px; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-s); box-shadow: var(--shadow-lift);
+  padding: .3rem; font-size: .86rem;
+}
+.proof-msg {
+  padding: .35rem .5rem .45rem; color: var(--ink-2); font-size: .78rem;
+  border-bottom: 1px solid var(--line-2); margin-bottom: .25rem;
+}
+.proof-item, .proof-action {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: none; font: inherit; color: var(--ink);
+  padding: .3rem .5rem; border-radius: 4px;
+}
+.proof-item { font-weight: 600; }
+.proof-action { color: var(--ink-2); font-size: .82rem; }
+.proof-item:hover, .proof-action:hover { background: var(--accent-soft); }
+.proof-none { padding: .3rem .5rem; color: var(--ink-3); font-size: .82rem; }
+.proof-divider { height: 1px; background: var(--line-2); margin: .25rem 0; }
 
 .legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .78rem; color: var(--ink-3); }
 .legend span { display: inline-flex; align-items: center; gap: .3rem; }

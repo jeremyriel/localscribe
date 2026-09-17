@@ -13,19 +13,78 @@ happened to end a segment.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from .transcript import (
+    DEFAULT_PAUSE_GAP,
     LOW_CONFIDENCE,
     full_text,
-    paragraphs,
     segment_text,
+    speaker_by_id,
+    speaker_roster,
     speakers,
     summary,
+    turn_blocks,
+    turns,
     word_count,
 )
 
 ALL_FORMATS = ("txt", "md", "docx", "vtt", "srt", "json")
+
+
+def rendered_turns(doc: dict, settings: dict) -> list:
+    """Turns prepared for a writer: label, blocks, and pause markers.
+
+    Every prose writer goes through this, so they cannot disagree about when a
+    speaker's name is printed. The rule is one label per turn: because a turn
+    is a maximal same-speaker run, a pause in the middle of someone's turn
+    breaks the paragraph but does not reprint their name.
+    """
+    gap = float(settings.get("paragraph_gap", DEFAULT_PAUSE_GAP) or 0.0)
+    show_pauses = bool(settings.get("show_pause_markers", True))
+    minimum = float(settings.get("pause_marker_seconds", 2.0) or 0.0)
+    style = str(settings.get("speaker_label_style", "name") or "name")
+
+    out = []
+    for turn in turns(doc, gap=gap):
+        speaker = speaker_by_id(doc, turn["speaker_id"])
+        if speaker:
+            label = speaker["short"] if style == "short" else speaker["name"]
+        else:
+            label = ""
+
+        blocks = []
+        for block in turn_blocks(turn):
+            text = " ".join(
+                t for t in (segment_text(s) for s in block["segments"]) if t
+            ).strip()
+            if not text:
+                continue
+            pause = block["pause_before"]
+            blocks.append({
+                "text": text,
+                "start": float(block["segments"][0].get("start") or 0.0),
+                "pause": pause if (show_pauses and pause and pause >= minimum) else None,
+            })
+
+        if blocks:
+            out.append({
+                "label": label,
+                "speaker": speaker,
+                "start": turn["start"],
+                "blocks": blocks,
+            })
+    return out
+
+
+def pause_marker(seconds: float) -> str:
+    return f"({seconds:.1f}s pause)"
+
+
+def speaker_legend(doc: dict) -> list:
+    """(name, acronym) pairs for the roster, for export headers."""
+    return [(s.get("name", ""), s.get("short", "")) for s in speaker_roster(doc)]
 
 
 # ---------------------------------------------------------------------------
@@ -174,12 +233,33 @@ def fits(text: str, max_chars: int, max_lines: int, reserve: int = 0) -> bool:
 # Writers
 # ---------------------------------------------------------------------------
 
+def caption_labels(doc: dict, settings: dict) -> dict:
+    """Map a display name to the label captions should carry.
+
+    Captions have very little room, so the acronym is usually preferable to a
+    full pseudonym. Returning a mapping keeps build_cues unaware of the roster.
+    """
+    style = str(settings.get("caption_speaker_style", "short") or "short")
+    if style == "none":
+        return {s.get("name", ""): "" for s in speaker_roster(doc)}
+    if style == "short":
+        return {
+            s.get("name", ""): (s.get("short") or s.get("name", ""))
+            for s in speaker_roster(doc)
+        }
+    return {}
+
+
 def write_vtt(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -> Path:
     max_chars = int(settings.get("vtt_max_chars", 42))
     max_lines = int(settings.get("vtt_max_lines", 2))
     max_duration = float(settings.get("vtt_max_duration", 6.0))
 
     cues = build_cues(doc, max_chars, max_lines, max_duration)
+    labels = caption_labels(doc, settings)
+    for cue in cues:
+        if cue["speaker"] in labels:
+            cue["speaker"] = labels[cue["speaker"]]
     out = ["WEBVTT", ""]
 
     title = (meta or {}).get("title") or ""
@@ -208,6 +288,10 @@ def write_srt(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -
     max_duration = float(settings.get("vtt_max_duration", 6.0))
 
     cues = build_cues(doc, max_chars, max_lines, max_duration)
+    labels = caption_labels(doc, settings)
+    for cue in cues:
+        if cue["speaker"] in labels:
+            cue["speaker"] = labels[cue["speaker"]]
     out = []
     for index, cue in enumerate(cues, start=1):
         body = cue["text"]
@@ -240,17 +324,22 @@ def write_txt(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -
         lines.extend(header)
         lines.append("")
 
-    for group in paragraphs(doc, gap=gap):
-        prefix_parts = []
-        if include_ts:
-            prefix_parts.append(f"[{stamp(group[0].get('start') or 0.0)}]")
-        speaker = (group[0].get("speaker") or "").strip()
-        if include_speakers and speaker:
-            prefix_parts.append(f"{speaker}:")
-        prefix = " ".join(prefix_parts)
-        body = " ".join(segment_text(s) for s in group if segment_text(s)).strip()
-        lines.append(f"{prefix} {body}".strip() if prefix else body)
-        lines.append("")
+    for turn in rendered_turns(doc, settings):
+        for index, block in enumerate(turn["blocks"]):
+            if block["pause"]:
+                lines.append(pause_marker(block["pause"]))
+
+            prefix_parts = []
+            if include_ts:
+                prefix_parts.append(f"[{stamp(block['start'])}]")
+            # The label goes on the first block only: the speaker has not
+            # changed just because they paused.
+            if include_speakers and turn["label"] and index == 0:
+                prefix_parts.append(f"{turn['label']}:")
+            prefix = " ".join(prefix_parts)
+
+            lines.append(f"{prefix} {block['text']}".strip() if prefix else block["text"])
+            lines.append("")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
@@ -269,7 +358,12 @@ def _plain_header(doc: dict, meta: dict) -> list:
     if info["language"]:
         rows.append(f"Language: {info['language']}")
     rows.append(f"Model: {info['model']} (OpenAI Whisper, run locally)")
-    if info["speakers"]:
+    legend = speaker_legend(doc)
+    if legend:
+        rows.append("Speakers: " + ", ".join(
+            f"{name} ({short})" if short else name for name, short in legend
+        ))
+    elif info["speakers"]:
         rows.append(f"Speakers: {', '.join(info['speakers'])}")
     rows.append(
         "Review status: "
@@ -311,10 +405,17 @@ def write_md(doc: dict, dest: Path, settings: dict, meta: dict | None = None) ->
     lines.append(f"human_reviewed: {str(bool(info['human_edited'])).lower()}")
     if info["retimestamped_at"]:
         lines.append(f'retimestamped_at: "{esc(info["retimestamped_at"])}"')
-    if info["speakers"]:
+    legend = speaker_legend(doc)
+    if legend:
+        lines.append("speakers:")
+        for name, short in legend:
+            lines.append(f'  - name: "{esc(name)}"')
+            if short:
+                lines.append(f'    short: "{esc(short)}"')
+    elif info["speakers"]:
         lines.append("speakers:")
         for name in info["speakers"]:
-            lines.append(f'  - "{esc(name)}"')
+            lines.append(f'  - name: "{esc(name)}"')
     for key in ("principal_investigator", "irb_protocol", "participant_id"):
         if meta.get(key):
             lines.append(f'{key}: "{esc(meta[key])}"')
@@ -333,17 +434,20 @@ def write_md(doc: dict, dest: Path, settings: dict, meta: dict | None = None) ->
     lines.append("## Transcript")
     lines.append("")
 
-    for group in paragraphs(doc, gap=gap):
-        speaker = (group[0].get("speaker") or "").strip()
-        parts = []
-        if include_speakers and speaker:
-            parts.append(f"**{speaker}**")
-        if include_ts:
-            parts.append(f"`{stamp(group[0].get('start') or 0.0)}`")
-        body = " ".join(segment_text(s) for s in group if segment_text(s)).strip()
-        prefix = " ".join(parts)
-        lines.append(f"{prefix} {body}".strip() if prefix else body)
-        lines.append("")
+    for turn in rendered_turns(doc, settings):
+        for index, block in enumerate(turn["blocks"]):
+            if block["pause"]:
+                lines.append(f"_{pause_marker(block['pause'])}_")
+                lines.append("")
+
+            parts = []
+            if include_speakers and turn["label"] and index == 0:
+                parts.append(f"**{turn['label']}**")
+            if include_ts:
+                parts.append(f"`{stamp(block['start'])}`")
+            prefix = " ".join(parts)
+            lines.append(f"{prefix} {block['text']}".strip() if prefix else block["text"])
+            lines.append("")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
@@ -354,6 +458,7 @@ def write_json(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     payload = {
         "meta": meta or {},
         "summary": summary(doc),
+        "speakers": speaker_roster(doc),
         "transcript": doc,
     }
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -403,7 +508,12 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     for key in ("principal_investigator", "irb_protocol", "participant_id"):
         if meta.get(key):
             rows.append((key.replace("_", " ").title(), str(meta[key])))
-    if info["speakers"]:
+    legend = speaker_legend(doc)
+    if legend:
+        rows.append(("Speakers", ", ".join(
+            f"{name} ({short})" if short else name for name, short in legend
+        )))
+    elif info["speakers"]:
         rows.append(("Speakers", ", ".join(info["speakers"])))
     if meta.get("generated"):
         rows.append(("Exported", str(meta["generated"])))
@@ -427,20 +537,29 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     document.add_paragraph()
     document.add_heading("Transcript", level=1)
 
-    for group in paragraphs(doc, gap=gap):
-        speaker = (group[0].get("speaker") or "").strip()
-        body = " ".join(segment_text(s) for s in group if segment_text(s)).strip()
-        if not body:
-            continue
-        paragraph = document.add_paragraph()
-        if include_ts:
-            ts_run = paragraph.add_run(f"[{stamp(group[0].get('start') or 0.0)}] ")
-            ts_run.font.size = Pt(9)
-            ts_run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
-        if include_speakers and speaker:
-            sp_run = paragraph.add_run(f"{speaker}: ")
-            sp_run.bold = True
-        paragraph.add_run(body)
+    for turn in rendered_turns(doc, settings):
+        for index, block in enumerate(turn["blocks"]):
+            if block["pause"]:
+                pause_para = document.add_paragraph()
+                pause_run = pause_para.add_run(pause_marker(block["pause"]))
+                pause_run.italic = True
+                pause_run.font.size = Pt(9)
+                pause_run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
+            paragraph = document.add_paragraph()
+            if include_ts:
+                ts_run = paragraph.add_run(f"[{stamp(block['start'])}] ")
+                ts_run.font.size = Pt(9)
+                ts_run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+            if include_speakers and turn["label"] and index == 0:
+                sp_run = paragraph.add_run(f"{turn['label']}: ")
+                sp_run.bold = True
+                # Tint the name with the speaker's colour so the document
+                # carries the same visual coding as the editor.
+                colour = (turn.get("speaker") or {}).get("color")
+                if colour and re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
+                    sp_run.font.color.rgb = RGBColor.from_string(colour[1:].upper())
+            paragraph.add_run(block["text"])
 
     if meta.get("notes"):
         document.add_heading("Project notes", level=1)

@@ -55,7 +55,11 @@
     <li>
       <strong>Validate and correct</strong> each transcript in a page of its
       own, with the audio playable in the window, a clickable time ribbon, and
-      click-a-word-to-hear-it playback. When the human pass is done, press
+      click-a-word-to-hear-it playback. Set up your speakers, then tag each
+      speaking turn with one click or a number key; names and colours carry
+      through to the exports. Find and replace fixes a recurring error across
+      the whole transcript. Misspellings are underlined in red and probable
+      transcription slips in blue. When the human pass is done, press
       Re-timestamp to bring the word timings and caption files back into
       agreement with the corrected text, then export.
     </li>
@@ -179,6 +183,16 @@
       rewritten passages are distributed proportionally and reported in the
       console for spot-checking.
     </dd>
+    <dt>Proofreading</dt>
+    <dd>
+      A 124,000-word English dictionary derived from SCOWL, covering both
+      American and British spellings, bundled with the application and used
+      entirely offline. Your project glossary and any words you accept are
+      added to it. The blue layer flags likely <em>transcription</em> slips --
+      doubled words, repeated-phrase loops, a/an mismatches -- and deliberately
+      does not check grammar, because verbatim speech is full of fragments and
+      false starts that are correct exactly as transcribed.
+    </dd>
     <dt>Interface</dt>
     <dd>Python, FastAPI, and plain HTML, CSS, and JavaScript. No frameworks fetched from the internet.</dd>
   </dl>
@@ -237,6 +251,13 @@
     Silero VAD is MIT licensed. FastAPI, Starlette, uvicorn and Jinja2 are MIT
     or BSD licensed. Model weights are redistributed by their respective
     publishers on the Hugging Face Hub under their own terms.
+  </p>
+  <p class="small">
+    The spelling dictionary is derived from <strong>SCOWL</strong>, copyright
+    &copy; 2000&ndash;2019 Kevin Atkinson, under a BSD-style permissive licence
+    that requires its notice to travel with it. The full text ships at
+    <code>app/data/dictionary/SCOWL-LICENSE.txt</code>, and a summary of every
+    third-party component is in <code>THIRD-PARTY-NOTICES.md</code>.
   </p>
   <p class="small muted">
     Whisper transcription quality varies with recording conditions, accent, and

@@ -215,16 +215,111 @@ def test_exports_reflect_edits():
     txt = Path(result["txt"]).read_text(encoding="utf-8")
     check("txt carries the new speaker label", "Participant 01:" in txt)
     md = Path(result["md"]).read_text(encoding="utf-8")
-    check("md front matter lists the speaker", '- "Participant 01"' in md)
+    check("md front matter lists the speaker with its acronym",
+          '- name: "Participant 01"' in md and "short:" in md,
+          md[:400])
     check("md declares local processing", "No audio or text left this machine" in md)
     vtt = Path(result["vtt"]).read_text(encoding="utf-8")
-    check("vtt carries the speaker voice tag", "<v Participant 01>" in vtt)
+    # Captions default to the acronym, because a full pseudonym eats the very
+    # limited room a caption line has.
+    check("vtt carries the speaker voice tag as an acronym",
+          "<v P01>" in vtt, vtt[:300])
+
+    full = dict(settings)
+    full["caption_speaker_style"] = "name"
+    out2 = Path(tempfile.mkdtemp()) / "outputs"
+    result2 = export_all(doc, out2, full, {"title": "T"}, formats=["vtt"])
+    check("captions can use the full name instead",
+          "<v Participant 01>" in Path(result2["vtt"]).read_text(encoding="utf-8"))
     check("docx is a non-trivial file", Path(result["docx"]).stat().st_size > 10_000,
           str(Path(result["docx"]).stat().st_size))
 
 
+def test_speaker_name_not_repeated_after_a_pause():
+    """The defect this feature set fixes.
+
+    One person talking either side of a long silence is still one turn, so
+    their name must be printed once. Before the turn model, every exporter
+    started a new paragraph at the pause and reprinted the name.
+    """
+    from app.transcript import make_segment, make_word, new_document, normalise
+
+    def build(index, start, end, text, speaker_id):
+        words, cursor = [], start
+        span = (end - start) / max(1, len(text.split()))
+        for token in text.split():
+            words.append(make_word(token, cursor, cursor + span * 0.9, 0.97))
+            cursor += span
+        return make_segment(index, start, end, text, words, speaker_id=speaker_id)
+
+    doc = new_document(duration=60.0, model="test", language="en")
+    doc["speakers"] = [
+        {"id": "s1", "name": "Interviewer", "short": "INT", "color": "#0f766e"},
+        {"id": "s2", "name": "Participant 04", "short": "P04", "color": "#b45309"},
+    ]
+    doc["segments"] = [
+        build(0, 0.0, 4.0, "So how did the pilot go?", "s1"),
+        build(1, 5.0, 10.0, "It went well overall I think.", "s2"),
+        # Six second silence, same speaker resumes.
+        build(2, 16.0, 21.0, "Although the second week was harder.", "s2"),
+        build(3, 22.0, 25.0, "Harder how?", "s1"),
+    ]
+    normalise(doc)
+
+    settings = default_settings()
+    out = Path(tempfile.mkdtemp()) / "outputs"
+    result = export_all(doc, out, settings, {"title": "Pilot"},
+                        formats=["txt", "md"])
+
+    txt = Path(result["txt"]).read_text(encoding="utf-8")
+    body = txt.split("Review status:", 1)[-1]
+    check("the paused speaker is named exactly once in .txt",
+          body.count("Participant 04:") == 1,
+          f'counted {body.count("Participant 04:")}')
+    check("the other speaker is named for each of their turns",
+          body.count("Interviewer:") == 2, f'counted {body.count("Interviewer:")}')
+    check("the pause itself is marked", "pause)" in body, body[:400])
+
+    md = Path(result["md"]).read_text(encoding="utf-8")
+    md_body = md.split("## Transcript", 1)[-1]
+    check("the paused speaker is named exactly once in .md",
+          md_body.count("**Participant 04**") == 1,
+          f'counted {md_body.count("**Participant 04**")}')
+
+    # And the text either side of the pause survives.
+    check("text before the pause is present", "went well overall" in txt)
+    check("text after the pause is present", "second week was harder" in txt)
+
+
+def test_pause_markers_can_be_switched_off():
+    from app.transcript import make_segment, make_word, new_document, normalise
+
+    doc = new_document(duration=60.0, model="test", language="en")
+    doc["speakers"] = [{"id": "s1", "name": "A", "short": "A", "color": "#0f766e"}]
+    doc["segments"] = [
+        make_segment(0, 0.0, 3.0, "First part here.",
+                     [make_word("First", 0.0, 1.0), make_word("part", 1.0, 2.0),
+                      make_word("here.", 2.0, 3.0)], speaker_id="s1"),
+        make_segment(1, 12.0, 15.0, "Second part here.",
+                     [make_word("Second", 12.0, 13.0), make_word("part", 13.0, 14.0),
+                      make_word("here.", 14.0, 15.0)], speaker_id="s1"),
+    ]
+    normalise(doc)
+
+    settings = default_settings()
+    settings["show_pause_markers"] = False
+    out = Path(tempfile.mkdtemp()) / "outputs"
+    result = export_all(doc, out, settings, {"title": "T"}, formats=["txt"])
+    txt = Path(result["txt"]).read_text(encoding="utf-8")
+    check("pause markers can be disabled", "pause)" not in txt, txt[-200:])
+    check("the name is still printed only once",
+          txt.count("A:") == 1, f'counted {txt.count("A:")}')
+
+
 def main() -> int:
     tests = [
+        test_speaker_name_not_repeated_after_a_pause,
+        test_pause_markers_can_be_switched_off,
         test_time_formats,
         test_wrap_respects_width,
         test_fits_accounts_for_greedy_wrap,

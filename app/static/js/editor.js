@@ -29,6 +29,7 @@
   const followToggle = document.getElementById('follow-play');
 
   let transcript = D.transcript;
+  let roster = (D.speakers || []).slice();
   let duration = Number(transcript.duration) || 0;
   let peaks = [];
   let activeSegment = -1;
@@ -60,19 +61,90 @@
     ).join(' ');
   }
 
-  function render() {
-    host.innerHTML = '';
-    const fragment = document.createDocumentFragment();
+  /* Turns, mirroring app/transcript.py:turns().
+
+     A turn is a maximal run of consecutive segments by one speaker. Because
+     consecutive turns always differ in speaker, rendering the name once per
+     turn means it is never repeated while the same person is still talking.
+     Pauses inside a turn are recorded, not used as boundaries, so a silence
+     breaks the paragraph without reprinting the name. */
+  function computeTurns() {
+    const gap = Number(D.pauseGap) || 1.5;
+    const out = [];
+    let current = null;
+    let previousEnd = null;
 
     transcript.segments.forEach((seg) => {
-      const el = document.createElement('div');
-      el.className = 'seg';
-      el.dataset.id = seg.id;
-      if (seg.edited) el.classList.add('edited');
-      if (seg.stale_timings) el.classList.add('stale');
+      const speakerId = seg.speaker_id || '';
+      const pause = previousEnd === null ? 0 : (seg.start - previousEnd);
 
-      const length = (seg.end - seg.start) || 0;
-      el.innerHTML = `
+      let boundary;
+      if (!current) boundary = true;
+      else if (speakerId !== current.speakerId) boundary = true;
+      // Untagged text splits at pauses so there is something to click.
+      else if (!speakerId && gap > 0 && pause >= gap) boundary = true;
+      else boundary = false;
+
+      if (boundary) {
+        current = { speakerId, segments: [], pauses: {}, index: out.length };
+        out.push(current);
+      } else if (gap > 0 && pause >= gap) {
+        current.pauses[seg.id] = pause;
+      }
+
+      current.segments.push(seg);
+      previousEnd = seg.end;
+    });
+    return out;
+  }
+
+  function speakerById(id) {
+    return roster.find((s) => s.id === id) || null;
+  }
+
+  function chipsHtml(turn) {
+    if (!roster.length) return '';
+    const chips = roster.map((speaker, index) => {
+      const on = speaker.id === turn.speakerId;
+      return `<button type="button" class="chip${on ? ' on' : ''}"
+        data-assign="${LS.escapeHtml(speaker.id)}"
+        style="--chip:${LS.escapeHtml(speaker.color)}"
+        title="Assign this turn to ${LS.escapeHtml(speaker.name)}${index < 9 ? ` (key ${index + 1})` : ''}"
+        aria-pressed="${on}">${LS.escapeHtml(speaker.short || speaker.name)}</button>`;
+    }).join('');
+    const clear = turn.speakerId
+      ? `<button type="button" class="chip chip-clear" data-assign=""
+           title="Clear the speaker on this turn">clear</button>`
+      : '';
+    return `<div class="chips">${chips}${clear}</div>`;
+  }
+
+  function turnHeaderHtml(turn) {
+    const speaker = speakerById(turn.speakerId);
+    const name = speaker
+      ? `<span class="turn-name">${LS.escapeHtml(speaker.name)}</span>`
+      : '<span class="turn-name unassigned">Unassigned</span>';
+    return `<div class="turn-head">
+        ${name}
+        <button type="button" class="seg-stamp" data-play="${turn.segments[0].start}"
+                title="Play this turn from the start">${stamp(turn.segments[0].start)}</button>
+        ${chipsHtml(turn)}
+      </div>`;
+  }
+
+  function segmentHtmlBlock(seg, turn) {
+    const pause = turn.pauses[seg.id];
+    const marker = pause
+      ? `<div class="pause-marker" title="Silence in the recording">
+           <span>${pause.toFixed(1)}s pause</span></div>`
+      : '';
+    const length = (seg.end - seg.start) || 0;
+    const classes = ['seg'];
+    if (seg.edited) classes.push('edited');
+    if (seg.stale_timings) classes.push('stale');
+
+    return `${marker}
+      <div class="${classes.join(' ')}" data-id="${seg.id}">
         <div class="seg-time">
           <button type="button" class="seg-stamp" data-play="${seg.start}"
                   title="Play from ${stamp(seg.start)}">${stamp(seg.start)}</button>
@@ -83,18 +155,32 @@
           </div>
         </div>
         <div class="seg-body">
-          <input class="seg-speaker" type="text" placeholder="Speaker"
-                 value="${LS.escapeHtml(seg.speaker || '')}"
-                 aria-label="Speaker for segment at ${stamp(seg.start)}">
-          <div class="seg-text" contenteditable="true" spellcheck="true"
+          <div class="seg-text" contenteditable="true" spellcheck="false"
                role="textbox" aria-multiline="true"
                aria-label="Transcript text at ${stamp(seg.start)}">${segmentHtml(seg)}</div>
-        </div>`;
+        </div>
+      </div>`;
+  }
+
+  function render() {
+    host.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    computeTurns().forEach((turn) => {
+      const speaker = speakerById(turn.speakerId);
+      const el = document.createElement('div');
+      el.className = `turn${speaker ? ' tagged' : ''}`;
+      el.dataset.turn = turn.index;
+      el.dataset.ids = turn.segments.map((s) => s.id).join(',');
+      if (speaker) el.style.setProperty('--speaker-color', speaker.color);
+      el.innerHTML = turnHeaderHtml(turn)
+        + turn.segments.map((seg) => segmentHtmlBlock(seg, turn)).join('');
       fragment.appendChild(el);
     });
 
     host.appendChild(fragment);
     updateStaleWarning();
+    document.dispatchEvent(new CustomEvent('ls:rendered'));
   }
 
   function segmentElement(id) {
@@ -183,6 +269,13 @@
       return;
     }
 
+    const chip = event.target.closest('[data-assign]');
+    if (chip) {
+      const turnEl = chip.closest('.turn');
+      assignTurn(turnEl, chip.dataset.assign);
+      return;
+    }
+
     const tool = event.target.closest('button[data-act]');
     if (tool) {
       const segEl = tool.closest('.seg');
@@ -245,22 +338,71 @@
       return;
     }
 
-    const speaker = event.target.closest('.seg-speaker');
-    if (speaker) {
-      const id = Number(speaker.closest('.seg').dataset.id);
-      const seg = segmentById(id);
-      const next = speaker.value.trim();
-      if (seg && next !== (seg.speaker || '')) {
-        seg.speaker = next;
-        queueEdit(id, { speaker: next });
-      }
-    }
   });
 
   host.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && event.target.closest('.seg-text, .seg-speaker')) {
       event.target.blur();
     }
+  });
+
+  /* ------------------------------------------------------- speaker tagging */
+
+  async function assignTurn(turnEl, speakerId) {
+    if (!turnEl) return;
+    const ids = (turnEl.dataset.ids || '')
+      .split(',').filter(Boolean).map(Number);
+    if (!ids.length) return;
+
+    // Apply locally first so tagging feels instant, then persist.
+    ids.forEach((id) => {
+      const seg = segmentById(id);
+      if (!seg) return;
+      seg.speaker_id = speakerId || '';
+      const speaker = speakerById(seg.speaker_id);
+      seg.speaker = speaker ? speaker.name : '';
+    });
+    render();
+
+    try {
+      await LS.post(`${api}/assign`, { segments: ids, speaker_id: speakerId || '' });
+      setSaveState('Saved', 'saved');
+    } catch (err) {
+      LS.toast(`Could not save the speaker: ${err.message}`, 'error');
+      setSaveState('Not saved', 'dirty');
+    }
+  }
+
+  /* The turn under the caret, or the one playing, or the one in view. */
+  function focusedTurn() {
+    if (editingSegment >= 0) {
+      const el = segmentElement(editingSegment);
+      if (el) return el.closest('.turn');
+    }
+    if (activeSegment >= 0) {
+      const el = segmentElement(activeSegment);
+      if (el) return el.closest('.turn');
+    }
+    const turnsEls = [...host.querySelectorAll('.turn')];
+    return turnsEls.find((el) => {
+      const box = el.getBoundingClientRect();
+      return box.bottom > 120 && box.top < window.innerHeight * 0.6;
+    }) || turnsEls[0] || null;
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target.matches('input, textarea, [contenteditable="true"]')) return;
+    if (!/^[1-9]$/.test(event.key)) return;
+
+    const speaker = roster[Number(event.key) - 1];
+    if (!speaker) return;
+    const turnEl = focusedTurn();
+    if (!turnEl) return;
+    event.preventDefault();
+    assignTurn(turnEl, speaker.id);
+    turnEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    LS.toast(`Turn assigned to ${speaker.name}.`, 'info', 1600);
   });
 
   /* -------------------------------------------------------------- playback */
@@ -637,6 +779,44 @@
   });
 
   /* ------------------------------------------------------------- start up */
+
+  /* The surface the sibling modules use.
+
+     speakers.js, findreplace.js and proofread.js each own one concern and
+     drive the editor through this, rather than reaching into its internals or
+     duplicating its state. `ls:rendered` fires after every re-render so they
+     can reattach to the new DOM. */
+  window.LSEditor = {
+    api,
+    get transcript() { return transcript; },
+    get roster() { return roster; },
+    setRoster(next) {
+      roster = (next || []).slice();
+      // Names may have changed, so refresh the resolved display names.
+      transcript.segments.forEach((seg) => {
+        const speaker = speakerById(seg.speaker_id || '');
+        seg.speaker = speaker ? speaker.name : '';
+        if (seg.speaker_id && !speaker) seg.speaker_id = '';
+      });
+      render();
+    },
+    setTranscript(next) {
+      transcript = next;
+      duration = Number(transcript.duration) || duration;
+      render();
+    },
+    segments() { return transcript.segments; },
+    segmentById,
+    segmentElement,
+    speakerById,
+    turns: computeTurns,
+    render,
+    queueEdit,
+    flush: () => flush.flush(),
+    setSaveState,
+    refreshOutputs,
+    playFrom,
+  };
 
   render();
   loadWaveform();

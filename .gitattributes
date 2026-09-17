@@ -28,6 +28,7 @@
 VERSION       text eol=lf
 
 # Binary assets: never touched.
+*.gz          binary
 *.png         binary
 *.ico         binary
 *.icns        binary

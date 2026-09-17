@@ -79,16 +79,75 @@
       </p>
     </div>
 
+    <!-- Speaker roster -->
+    <div class="card speaker-card">
+      <div class="row" style="margin-bottom:.6rem">
+        <h2 style="margin:0">Speakers</h2>
+        <div class="stepper" role="group" aria-label="Number of speakers">
+          <button type="button" id="spk-minus" aria-label="Remove a speaker">&minus;</button>
+          <input type="number" id="spk-count" min="0" max="12" step="1"
+                 value="{{ speakers|length }}" aria-label="Number of speakers">
+          <button type="button" id="spk-plus" aria-label="Add a speaker">+</button>
+        </div>
+        <span class="save-state" id="spk-state"></span>
+        <div class="spacer"></div>
+        <span class="small muted">
+          Click a tag on a turn to assign it, or press
+          <kbd>1</kbd>&ndash;<kbd>9</kbd> on the turn you are reading.
+        </span>
+      </div>
+
+      <div id="speaker-rows" class="speaker-rows"></div>
+
+      <p class="small muted" id="speaker-empty" hidden>
+        No speakers yet. Add one or more above, give each a name and a short
+        tag, then click through the transcript assigning turns.
+      </p>
+    </div>
+
     <!-- Transcript -->
     <div class="card">
       <div class="row" style="margin-bottom:.6rem">
         <h2 style="margin:0">Transcript</h2>
         <span class="save-state" id="save-state">Saved</span>
         <div class="spacer"></div>
+        <button type="button" class="btn btn-small btn-quiet" id="find-toggle"
+                title="Find and replace (Ctrl+F)">Find</button>
+        <button type="button" class="btn btn-small btn-quiet" id="jump-issue"
+                title="Jump to the next spelling or artefact flag">
+          Next flag <span class="badge" id="issue-count">0</span>
+        </button>
         <button type="button" class="btn btn-small btn-quiet" id="jump-low"
                 title="Jump to the next word the model was unsure about">
           Next uncertain word
         </button>
+      </div>
+
+      <!-- Find and replace -->
+      <div class="findbar" id="findbar" hidden>
+        <div class="find-row">
+          <input type="text" id="find-input" placeholder="Find in this transcript"
+                 aria-label="Find" autocomplete="off" spellcheck="false">
+          <span class="find-count" id="find-count">0 matches</span>
+          <button type="button" class="btn btn-small btn-quiet" id="find-prev"
+                  aria-label="Previous match">&uarr;</button>
+          <button type="button" class="btn btn-small btn-quiet" id="find-next"
+                  aria-label="Next match">&darr;</button>
+          <button type="button" class="btn btn-small btn-quiet" id="find-close"
+                  aria-label="Close find">&times;</button>
+        </div>
+        <div class="find-row">
+          <input type="text" id="replace-input" placeholder="Replace with"
+                 aria-label="Replace with" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn btn-small" id="replace-one">Replace</button>
+          <button type="button" class="btn btn-small" id="replace-all">Replace all</button>
+        </div>
+        <div class="find-row find-opts">
+          <label class="chk"><input type="checkbox" id="find-case"> Match case</label>
+          <label class="chk"><input type="checkbox" id="find-word"> Whole word</label>
+          <label class="chk"><input type="checkbox" id="find-regex"> Regular expression</label>
+          <span class="find-note" id="find-note"></span>
+        </div>
       </div>
 
       <div id="stale-warning" class="notice notice-warn" hidden>
@@ -103,7 +162,19 @@
           low model confidence (below {{ (low_confidence * 100) | int }}%)</span>
         <span><span class="swatch" style="background:var(--accent-soft)"></span> currently playing</span>
         <span><span class="swatch" style="background:var(--warn-soft)"></span> edited, needs re-timestamping</span>
+        {% if proofreading.available %}
+        <span><span class="swatch swatch-spell"></span> not in dictionary</span>
+        <span><span class="swatch swatch-artefact"></span> likely transcription slip</span>
+        {% endif %}
       </div>
+
+      {% if not proofreading.available %}
+      <div class="notice small" style="margin-bottom:.7rem">
+        The spelling dictionary is not installed, so proofreading is off. A
+        maintainer can build it by running
+        <code>assets/dictionary/build_dictionary.py</code>.
+      </div>
+      {% endif %}
 
       <div class="segments" id="segments"></div>
     </div>
@@ -221,8 +292,15 @@
     filename: {{ document.filename|tojson }},
     lowConfidence: {{ low_confidence|tojson }},
     transcript: {{ transcript|tojson }},
+    speakers: {{ speakers|tojson }},
+    palette: {{ palette|tojson }},
+    pauseGap: {{ pause_gap|tojson }},
+    proofreading: {{ proofreading|tojson }},
   };
 </script>
 <script src="/static/js/editor.js"></script>
+<script src="/static/js/speakers.js"></script>
+<script src="/static/js/findreplace.js"></script>
+<script src="/static/js/proofread.js"></script>
 {% endif %}
 {% endblock %}

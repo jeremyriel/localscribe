@@ -321,8 +321,51 @@ SETTINGS_SCHEMA = [
             _f("txt_include_speakers", "Include speaker labels", "bool", True,
                "Uses the speaker names you assign in the editor."),
             _f("paragraph_gap", "Paragraph break on pause (s)", "number", 1.5,
-               "Silence longer than this starts a new paragraph in .txt and .md.",
+               "Silence longer than this starts a new paragraph. It does not "
+               "start a new speaking turn, so a pause never causes the "
+               "speaker's name to be printed again.",
                min=0.0, max=10.0, step=0.25),
+            _f("show_pause_markers", "Mark long pauses in the text", "bool", True,
+               "Writes a marker such as (4.2s pause) where the recording goes "
+               "quiet mid-turn. Useful when a silence is itself meaningful."),
+            _f("pause_marker_seconds", "Minimum pause to mark (s)", "number", 2.0,
+               "Only pauses at least this long get a marker, so ordinary "
+               "breath pauses do not clutter the transcript.",
+               min=0.5, max=30.0, step=0.5),
+            _f("speaker_label_style", "Speaker label", "select", "name",
+               "'name' prints the full name or pseudonym. 'short' prints the "
+               "acronym instead, which suits captions and narrow columns.",
+               options=["name", "short"]),
+            _f("caption_speaker_style", "Caption speaker label", "select", "short",
+               "Captions have very little room, so the acronym is usually the "
+               "better choice for .vtt and .srt files.",
+               options=["name", "short", "none"]),
+        ],
+    },
+    {
+        "id": "proofread",
+        "title": "Proofreading",
+        "blurb": (
+            "Marks probable errors in the transcript editor: red for words not "
+            "in the dictionary, blue for likely transcription artefacts. "
+            "Nothing is ever changed automatically, and nothing is written into "
+            "your exported files."
+        ),
+        "fields": [
+            _f("proofread_spelling", "Check spelling", "bool", True,
+               "Underlines words that are not in the dictionary, your project "
+               "glossary, or the words you have accepted for this document. "
+               "American and British spellings are both accepted."),
+            _f("proofread_artefacts", "Check for transcription artefacts", "bool", True,
+               "Underlines doubled words, repeated-phrase loops, a/an "
+               "mismatches, spacing slips and lost sentence capitals. It does "
+               "NOT check grammar: people speak in fragments and false starts, "
+               "and flagging that would bury real errors and tempt you into "
+               "editing the data."),
+            _f("proofread_suggestions", "Suggestions to offer", "slider", 5,
+               "How many corrections to list when you right-click a flagged "
+               "word. 0 disables suggestions and only marks the word.",
+               min=0, max=10, step=1),
         ],
     },
     {

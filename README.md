@@ -44,7 +44,16 @@ copy is ever running.
 4. Open a transcribed file to review it: play the audio, click the time ribbon
    or any word to hear it again, and correct the text. Edits save
    automatically.
-5. When the human pass is done, press **Re-timestamp and rewrite captions**,
+5. Set the number of **Speakers** at the top, give each a name, a short tag and
+   a colour, then tag each speaking turn by clicking its tag or pressing
+   <kbd>1</kbd>–<kbd>9</kbd>. A speaker's name is printed once per turn, so a
+   pause in the middle of someone talking breaks the paragraph without
+   repeating their name.
+6. Use **Find** (or <kbd>Ctrl</kbd>+<kbd>F</kbd>) to fix a recurring error
+   across the whole transcript. Red underlines mark words that are not in the
+   dictionary, blue ones mark probable transcription slips; right-click either
+   for suggestions or to accept the word.
+7. When the human pass is done, press **Re-timestamp and rewrite captions**,
    then download the outputs.
 
 ## What you get per recording
@@ -123,6 +132,8 @@ the repetition penalty slightly, then re-transcribe.
 .venv/Scripts/python.exe -m tests.test_realign      # re-timestamping
 .venv/Scripts/python.exe -m tests.test_exporters     # captions and exports
 .venv/Scripts/python.exe -m tests.test_assets        # front-end asset guards
+.venv/Scripts/python.exe -m tests.test_speakers      # roster and speaking turns
+.venv/Scripts/python.exe -m tests.test_proofread     # spelling and artefacts
 ```
 
 On macOS and Linux use `.venv/bin/python` instead.
@@ -141,5 +152,8 @@ the TRAILblazer Lab is appreciated but not required.
 
 Whisper (OpenAI), faster-whisper, CTranslate2, python-docx, Silero VAD,
 FastAPI, Starlette, uvicorn and Jinja2 are MIT or BSD licensed. PyAV is BSD
-licensed and links FFmpeg, which is LGPL/GPL depending on build. Model weights
-are redistributed by their publishers under their own terms.
+licensed and links FFmpeg, which is LGPL/GPL depending on build. The bundled
+spelling dictionary is derived from SCOWL (BSD-style; its notice ships at
+`app/data/dictionary/SCOWL-LICENSE.txt`). Model weights are redistributed by
+their publishers under their own terms. Full detail is in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

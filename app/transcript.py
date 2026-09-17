@@ -10,7 +10,7 @@ Shape
 ::
 
     {
-      "schema": 2,
+      "schema": 3,
       "created": "...", "updated": "...",
       "language": "en", "language_probability": 0.99,
       "duration": 3612.4,
@@ -18,14 +18,36 @@ Shape
       "engine": {...},          # settings actually used, for reproducibility
       "stats": {...},           # throughput measured during transcription
       "human_edited": false,
+      "speakers": [             # the roster; see "Speakers" below
+        {"id": "s1", "name": "Interviewer", "short": "INT", "color": "#0f766e"}
+      ],
+      "dictionary": ["TRAILblazer"],   # words the validator accepted
       "segments": [
         {"id": 0, "start": 0.0, "end": 4.2, "text": "...",
-         "speaker": "", "edited": false,
+         "speaker_id": "s1", "speaker": "Interviewer", "edited": false,
          "words": [{"w": "Hello", "start": 0.1, "end": 0.4, "prob": 0.98}],
          "avg_logprob": -0.21, "no_speech_prob": 0.01,
          "compression_ratio": 1.4, "temperature": 0.0}
       ]
     }
+
+Speakers and turns
+------------------
+``speaker_id`` is authoritative and ``speaker`` is the display name resolved
+from the roster on every normalise, so the two cannot drift. Keeping the
+resolved name means the exporters, the VTT voice tag and ``summary()`` need no
+knowledge of the roster, and a transcript opened in a text editor still reads.
+
+A **turn** is a maximal run of consecutive segments sharing one speaker. That
+definition is what makes the display rule fall out for free: consecutive turns
+always differ in speaker, so printing the name once per turn means it is never
+repeated while the same person is still talking. Pauses inside a turn are
+recorded rather than used as boundaries, so a silence breaks the paragraph
+without reprinting the name.
+
+Schema 2 documents, which stored a free-text speaker string per segment,
+migrate automatically on load: distinct names become roster entries and the
+existing tagging is preserved.
 """
 
 from __future__ import annotations
@@ -33,12 +55,36 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Confidence below which the editor tints a word for attention.
 LOW_CONFIDENCE = 0.55
 
+# Pause inside one speaker's turn that is long enough to show as a break.
+DEFAULT_PAUSE_GAP = 1.5
+
 _WORD_SPLIT = re.compile(r"\S+")
+
+# ---------------------------------------------------------------------------
+# Speaker palette
+# ---------------------------------------------------------------------------
+# The Okabe-Ito qualitative palette, which stays distinguishable under all
+# common forms of colour vision deficiency. Two entries are darkened from the
+# published values so they hold contrast against the warm paper background.
+#
+# Colour is never the only channel that identifies a speaker: the acronym is
+# always rendered as text beside it, so the interface remains usable in
+# greyscale and for anyone who cannot distinguish these hues (WCAG 1.4.1).
+PALETTE = (
+    "#0f766e",  # teal - matches the application accent
+    "#b45309",  # amber
+    "#1d5fa8",  # blue
+    "#9a3f8f",  # purple
+    "#166534",  # green
+    "#a3341f",  # vermillion
+    "#7a5c00",  # olive
+    "#3f6d86",  # slate blue
+)
 
 
 def _now() -> str:
@@ -65,6 +111,8 @@ def new_document(
         "stats": {},
         "human_edited": False,
         "retimestamped_at": None,
+        "speakers": [],
+        "dictionary": [],
         "segments": [],
     }
 
@@ -94,6 +142,9 @@ def make_segment(
         "start": round(float(start), 3),
         "end": round(float(end), 3),
         "text": text.strip(),
+        # `speaker_id` is authoritative; `speaker` is the resolved display name,
+        # rewritten from the roster on every normalise so the two cannot drift.
+        "speaker_id": meta.get("speaker_id", ""),
         "speaker": meta.get("speaker", ""),
         "edited": bool(meta.get("edited", False)),
         "words": words or [],
@@ -227,6 +278,297 @@ def summary(doc: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Speakers
+# ---------------------------------------------------------------------------
+
+def derive_short(name: str, taken=()) -> str:
+    """Derive an acronym from a speaker name, avoiding collisions.
+
+    "Participant 04" -> "P04", "Interviewer" -> "INT", "Ana Maria Ruiz" -> "AMR".
+    The validator can always override it; this only supplies a sensible start.
+    """
+    text = (name or "").strip()
+    if not text:
+        return ""
+    taken = {t.upper() for t in taken if t}
+
+    parts = [p for p in re.split(r"[\s_-]+", text) if p]
+    if len(parts) >= 2:
+        # Keep a trailing number whole: "Participant 04" reads better as P04.
+        if re.fullmatch(r"\d+", parts[-1]):
+            candidate = parts[0][0] + parts[-1]
+        else:
+            candidate = "".join(p[0] for p in parts[:3])
+    else:
+        # A single word: strip vowels after the first letter for a compact tag.
+        word = parts[0]
+        letters = word[0] + re.sub(r"[aeiou]", "", word[1:], flags=re.I)
+        candidate = (letters or word)[:3]
+
+    candidate = candidate.upper()[:4]
+    if candidate not in taken:
+        return candidate
+
+    for suffix in range(2, 100):
+        probe = f"{candidate[:3]}{suffix}"
+        if probe not in taken:
+            return probe
+    return candidate
+
+
+def new_speaker(index: int, name: str = "", roster=()) -> dict:
+    """Build a roster entry. `index` drives the default name and colour."""
+    label = (name or "").strip() or f"Speaker {index + 1}"
+    taken_ids = {s.get("id") for s in roster}
+    speaker_id = f"s{index + 1}"
+    bump = index + 1
+    while speaker_id in taken_ids:
+        bump += 1
+        speaker_id = f"s{bump}"
+    return {
+        "id": speaker_id,
+        "name": label,
+        "short": derive_short(label, [s.get("short") for s in roster]),
+        "color": PALETTE[index % len(PALETTE)],
+    }
+
+
+def speaker_roster(doc: dict) -> list:
+    return doc.get("speakers") or []
+
+
+def speaker_by_id(doc: dict, speaker_id: str) -> dict | None:
+    if not speaker_id:
+        return None
+    for speaker in speaker_roster(doc):
+        if speaker.get("id") == speaker_id:
+            return speaker
+    return None
+
+
+def clean_roster(roster) -> list:
+    """Validate an incoming roster, filling gaps and de-duplicating ids."""
+    cleaned: list = []
+    seen_ids: set = set()
+    for index, raw in enumerate(roster or []):
+        if not isinstance(raw, dict):
+            continue
+        speaker_id = str(raw.get("id") or "").strip() or f"s{index + 1}"
+        while speaker_id in seen_ids:
+            speaker_id = f"{speaker_id}x"
+        seen_ids.add(speaker_id)
+
+        name = str(raw.get("name") or "").strip() or f"Speaker {index + 1}"
+        short = str(raw.get("short") or "").strip()[:6]
+        if not short:
+            short = derive_short(name, [s["short"] for s in cleaned])
+        color = str(raw.get("color") or "").strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            color = PALETTE[index % len(PALETTE)]
+
+        cleaned.append({
+            "id": speaker_id, "name": name, "short": short, "color": color,
+        })
+    return cleaned
+
+
+def set_roster(doc: dict, roster) -> dict:
+    """Replace the roster, unassigning segments whose speaker disappeared.
+
+    Returns a report naming how many segments were unassigned, so the caller
+    can tell the user rather than silently orphaning their tagging work.
+    """
+    cleaned = clean_roster(roster)
+    valid = {s["id"] for s in cleaned}
+
+    orphaned = 0
+    lost: dict = {}
+    for seg in doc.get("segments", []):
+        current = seg.get("speaker_id") or ""
+        if current and current not in valid:
+            previous = speaker_by_id(doc, current)
+            lost[current] = (previous or {}).get("name", current)
+            seg["speaker_id"] = ""
+            orphaned += 1
+
+    doc["speakers"] = cleaned
+    resolve_speakers(doc)
+    doc["updated"] = _now()
+    return {
+        "unassigned_segments": orphaned,
+        "removed_speakers": sorted(lost.values()),
+        "speakers": cleaned,
+    }
+
+
+def resolve_speakers(doc: dict) -> dict:
+    """Rewrite every segment's display name from its speaker id.
+
+    `speaker` exists so that the exporters, the VTT voice tag and
+    `summary()` keep working unchanged, and so an old transcript opened in a
+    text editor still reads sensibly. It is derived, never authoritative.
+    """
+    lookup = {s.get("id"): s for s in speaker_roster(doc)}
+    for seg in doc.get("segments", []):
+        speaker_id = seg.get("speaker_id") or ""
+        if speaker_id and speaker_id in lookup:
+            seg["speaker"] = lookup[speaker_id].get("name", "")
+        elif not speaker_id:
+            seg["speaker"] = ""
+    return doc
+
+
+def assign_speaker(doc: dict, segment_ids, speaker_id: str) -> int:
+    """Tag the given segments with a speaker. Empty id clears the tag."""
+    wanted = {int(s) for s in segment_ids or []}
+    if speaker_id and speaker_by_id(doc, speaker_id) is None:
+        raise ValueError(f"No speaker with id {speaker_id!r} in this transcript.")
+
+    changed = 0
+    for seg in doc.get("segments", []):
+        if int(seg.get("id", -1)) not in wanted:
+            continue
+        if (seg.get("speaker_id") or "") != (speaker_id or ""):
+            seg["speaker_id"] = speaker_id or ""
+            changed += 1
+
+    if changed:
+        resolve_speakers(doc)
+        doc["human_edited"] = True
+        doc["updated"] = _now()
+    return changed
+
+
+def migrate_speakers(doc: dict) -> dict:
+    """Build a roster from legacy free-text speaker strings.
+
+    Schema 2 stored the speaker as a bare string per segment. Any distinct
+    non-empty value becomes a roster entry, keeping the tagging work already
+    done. Idempotent: once every segment carries a `speaker_id`, this is a
+    no-op.
+    """
+    if doc.get("speakers"):
+        # A roster exists; just make sure legacy strings still map onto it.
+        by_name = {s.get("name"): s.get("id") for s in doc["speakers"]}
+        for seg in doc.get("segments", []):
+            if not seg.get("speaker_id") and seg.get("speaker") in by_name:
+                seg["speaker_id"] = by_name[seg["speaker"]]
+        return doc
+
+    names: list = []
+    for seg in doc.get("segments", []):
+        name = (seg.get("speaker") or "").strip()
+        if name and name not in names:
+            names.append(name)
+
+    roster: list = []
+    for index, name in enumerate(names):
+        roster.append(new_speaker(index, name, roster))
+
+    doc["speakers"] = roster
+    by_name = {s["name"]: s["id"] for s in roster}
+    for seg in doc.get("segments", []):
+        name = (seg.get("speaker") or "").strip()
+        seg["speaker_id"] = by_name.get(name, "")
+    return doc
+
+
+# ---------------------------------------------------------------------------
+# Turns
+# ---------------------------------------------------------------------------
+
+def turns(doc: dict, gap: float = DEFAULT_PAUSE_GAP) -> list:
+    """Group segments into speaking turns.
+
+    A turn is a *maximal run of consecutive segments sharing one speaker*.
+    Defining it that way makes the display rule fall out for free: consecutive
+    turns always differ in speaker, so rendering the name once per turn means
+    it is never repeated while the same person is still talking -- which is
+    exactly what a transcript should do.
+
+    Pauses at or above `gap` *within* a turn are recorded rather than used as
+    boundaries, so a long silence shows as a break in the text without
+    reprinting the speaker's name.
+
+    Untagged segments (no speaker_id) are grouped at pauses instead, so an
+    untranscribed-by-speaker document still arrives as sensible, clickable
+    units for the validator to tag.
+    """
+    grouped: list = []
+    current: dict | None = None
+    previous_end: float | None = None
+
+    for seg in doc.get("segments", []):
+        speaker_id = seg.get("speaker_id") or ""
+        start = float(seg.get("start") or 0.0)
+        pause = (start - previous_end) if previous_end is not None else 0.0
+
+        if current is None:
+            boundary = True
+        elif speaker_id != current["speaker_id"]:
+            boundary = True
+        elif not speaker_id and gap > 0 and pause >= gap:
+            # Untagged: split on pauses so there is something to click.
+            boundary = True
+        else:
+            boundary = False
+
+        if boundary:
+            current = {
+                "speaker_id": speaker_id,
+                "segments": [],
+                "pauses": [],
+                "start": start,
+                "end": float(seg.get("end") or start),
+            }
+            grouped.append(current)
+        elif gap > 0 and pause >= gap:
+            # A pause inside a turn: recorded against the segment that follows
+            # it, so the renderer can break there without a new speaker label.
+            current["pauses"].append({
+                "before": int(seg.get("id", 0)),
+                "seconds": round(pause, 2),
+            })
+
+        current["segments"].append(seg)
+        current["end"] = float(seg.get("end") or start)
+        previous_end = current["end"]
+
+    for index, turn in enumerate(grouped):
+        turn["index"] = index
+        turn["ids"] = [int(s.get("id", 0)) for s in turn["segments"]]
+    return grouped
+
+
+def turn_text(turn: dict) -> str:
+    return " ".join(
+        t for t in (segment_text(s) for s in turn.get("segments", [])) if t
+    ).strip()
+
+
+def turn_blocks(turn: dict) -> list:
+    """Split one turn into paragraph blocks at its recorded pauses.
+
+    Returns [{"segments": [...], "pause_before": float|None}], so a writer can
+    render a break and an optional marker without reprinting the speaker.
+    """
+    pauses = {p["before"]: p["seconds"] for p in turn.get("pauses", [])}
+    blocks: list = []
+    current: dict | None = None
+
+    for seg in turn.get("segments", []):
+        seg_id = int(seg.get("id", 0))
+        if current is None or seg_id in pauses:
+            current = {
+                "segments": [],
+                "pause_before": pauses.get(seg_id) if current is not None else None,
+            }
+            blocks.append(current)
+        current["segments"].append(seg)
+    return blocks
+
+
+# ---------------------------------------------------------------------------
 # Normalisation
 # ---------------------------------------------------------------------------
 
@@ -240,6 +582,10 @@ def normalise(doc: dict) -> dict:
     """
     segments = doc.get("segments") or []
     duration = float(doc.get("duration") or 0.0)
+
+    doc.setdefault("speakers", [])
+    doc.setdefault("dictionary", [])
+    migrate_speakers(doc)
 
     segments.sort(key=lambda s: (float(s.get("start") or 0.0), float(s.get("end") or 0.0)))
 
@@ -298,6 +644,8 @@ def normalise(doc: dict) -> dict:
         doc["duration"] = round(previous_end, 3)
 
     doc["segments"] = segments
+    doc["schema"] = SCHEMA_VERSION
+    resolve_speakers(doc)
     doc["updated"] = _now()
     return doc
 
@@ -328,11 +676,35 @@ def apply_edits(doc: dict, edits: list) -> dict:
         if seg is None:
             continue
 
-        if "speaker" in edit:
-            new_speaker = (edit.get("speaker") or "").strip()
-            if new_speaker != seg.get("speaker", ""):
-                seg["speaker"] = new_speaker
+        if "speaker_id" in edit:
+            wanted = str(edit.get("speaker_id") or "").strip()
+            if wanted and speaker_by_id(doc, wanted) is None:
+                wanted = ""
+            if wanted != (seg.get("speaker_id") or ""):
+                seg["speaker_id"] = wanted
                 touched += 1
+
+        elif "speaker" in edit:
+            # A bare name rather than an id. Resolve it against the roster,
+            # adding an entry when it is new, so a transcript edited by some
+            # other tool -- or an older client -- still tags correctly instead
+            # of having the name silently dropped by resolve_speakers().
+            name = (edit.get("speaker") or "").strip()
+            if not name:
+                if seg.get("speaker_id"):
+                    seg["speaker_id"] = ""
+                    touched += 1
+            else:
+                match = next(
+                    (s for s in speaker_roster(doc) if s.get("name") == name), None
+                )
+                if match is None:
+                    roster = speaker_roster(doc)
+                    match = new_speaker(len(roster), name, roster)
+                    doc.setdefault("speakers", []).append(match)
+                if seg.get("speaker_id") != match["id"]:
+                    seg["speaker_id"] = match["id"]
+                    touched += 1
 
         if "text" in edit:
             new_text = (edit.get("text") or "").strip()
@@ -349,6 +721,7 @@ def apply_edits(doc: dict, edits: list) -> dict:
                 touched += 1
 
     if touched:
+        resolve_speakers(doc)
         doc["human_edited"] = True
         doc["updated"] = _now()
     return doc
@@ -412,38 +785,19 @@ def merge_segment(doc: dict, seg_id: int) -> dict:
     return doc
 
 
-def paragraphs(doc: dict, gap: float = 1.5) -> list:
-    """Group segments into paragraphs on silence gaps and speaker changes.
+def paragraphs(doc: dict, gap: float = DEFAULT_PAUSE_GAP) -> list:
+    """Flat list of paragraph blocks, for callers that do not need turns.
 
-    Used by the .txt and .md exporters so the prose reads as prose rather than
-    as a list of caption fragments.
+    Expressed in terms of ``turns()`` so that prose output and the editor
+    agree about where a turn starts. Prefer ``turns()`` directly when the
+    speaker label matters: this helper deliberately loses the distinction
+    between "a new speaker" and "the same speaker after a pause", which is the
+    distinction that decides whether to print a name.
     """
     out: list = []
-    current: list = []
-    last_end = None
-    last_speaker = None
-
-    for seg in doc.get("segments", []):
-        text = segment_text(seg)
-        if not text:
-            continue
-        speaker = seg.get("speaker") or ""
-        start = float(seg.get("start") or 0.0)
-
-        boundary = False
-        if last_end is not None and gap > 0 and (start - last_end) >= gap:
-            boundary = True
-        if last_speaker is not None and speaker != last_speaker:
-            boundary = True
-
-        if boundary and current:
-            out.append(current)
-            current = []
-
-        current.append(seg)
-        last_end = float(seg.get("end") or start)
-        last_speaker = speaker
-
-    if current:
-        out.append(current)
+    for turn in turns(doc, gap=gap):
+        for block in turn_blocks(turn):
+            segments = [s for s in block["segments"] if segment_text(s)]
+            if segments:
+                out.append(segments)
     return out

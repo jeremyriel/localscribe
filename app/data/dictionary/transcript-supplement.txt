@@ -1,0 +1,95 @@
+# Transcript supplement for Local Scribe's spelling dictionary.
+#
+# A general English dictionary is built for written prose, so on a verbatim
+# speech transcript it marks a great deal of correct transcription as
+# misspelled. Every hesitation and colloquial contraction lights up red, which
+# buries the real errors the validator is looking for.
+#
+# These are the forms that the SCOWL dictionary does not carry but that appear
+# constantly in spoken-word transcripts. Everything already in SCOWL (um, uh,
+# mm, hmm, yeah, okay, gonna, gotta, kinda, dunno, alright, anyways, ...) is
+# deliberately not repeated here.
+#
+# Lines starting with # are comments. One word per line, lowercase; matching is
+# case-insensitive. Hyphenated forms such as "mm-hmm" are checked part by part,
+# so only the parts need to appear.
+#
+# To add project-specific vocabulary, use the project glossary on the project
+# page instead of editing this file -- the glossary is fed to the checker
+# automatically and also improves Whisper's own spelling of those terms.
+
+# --- hesitation and backchannel, extended spellings ---------------------
+ahh
+ahhh
+erm
+hmmm
+mmm
+mmmm
+mhm
+mhmm
+mmhmm
+ohh
+ohhh
+uhh
+uhhh
+uhhuh
+uhuh
+umm
+ummm
+nuh
+nuhuh
+yeh
+yah
+yea
+naw
+welp
+oof
+psh
+pff
+tsk
+shh
+
+# --- colloquial contractions Whisper writes verbatim --------------------
+alrighty
+coulda
+woulda
+shoulda
+oughta
+musta
+cuz
+dya
+whatcha
+yknow
+ol
+
+# --- dropped-g forms, common in verbatim transcription ------------------
+comin
+doin
+goin
+nothin
+somethin
+talkin
+thinkin
+tryin
+sayin
+lookin
+workin
+gettin
+
+# --- research and transcription vocabulary ------------------------------
+deidentified
+deidentify
+deidentification
+pseudonymise
+pseudonymised
+pseudonymize
+pseudonymized
+anonymise
+anonymised
+transcriber
+transcribers
+unintelligible
+inaudible
+crosstalk
+paraphrasing
+verbatim

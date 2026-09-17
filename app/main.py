@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import catalog, exporters, media, projects
+from . import catalog, exporters, media, proofread, projects
 from .config import (
     APP_NAME,
     HOST,
@@ -44,11 +44,16 @@ from .jobs import QUEUE
 from .realign import describe_report, retimestamp
 from .transcript import (
     LOW_CONFIDENCE,
+    PALETTE,
     apply_edits,
+    assign_speaker,
     merge_segment,
     normalise,
+    set_roster,
     split_segment,
+    speaker_roster,
     summary,
+    turns,
 )
 
 PORT = resolve_port()
@@ -224,6 +229,14 @@ async def page_document(request: Request, slug: str, doc_id: str):
             info=summary(doc) if doc else None,
             outputs=projects.list_outputs(slug, doc_id),
             revisions=projects.list_revisions(slug, doc_id),
+            speakers=speaker_roster(doc) if doc else [],
+            palette=list(PALETTE),
+            pause_gap=float(SETTINGS.get("paragraph_gap") or 1.5),
+            proofreading={
+                "spelling": bool(SETTINGS.get("proofread_spelling", True)),
+                "artefacts": bool(SETTINGS.get("proofread_artefacts", True)),
+                "available": proofread.DICTIONARY.available,
+            },
         ),
     )
 
@@ -796,6 +809,152 @@ async def api_save_transcript(slug: str, doc_id: str, request: Request):
         "stale_timings": stale,
         "updated": doc["updated"],
     }
+
+
+@app.put("/api/projects/{slug}/documents/{doc_id}/speakers")
+async def api_save_speakers(slug: str, doc_id: str, request: Request):
+    """Replace the speaker roster for one document."""
+    payload = await request.json()
+    roster = payload.get("speakers")
+    if not isinstance(roster, list):
+        raise HTTPException(status_code=400, detail="Expected a 'speakers' list.")
+
+    doc = _load_doc_or_404(slug, doc_id)
+    report = set_roster(doc, roster)
+    projects.save_transcript(
+        slug, doc_id, doc, revision=False,
+        keep=int(SETTINGS.get("autosave_revisions") or 20),
+    )
+
+    names = ", ".join(s["name"] for s in report["speakers"]) or "none"
+    CONSOLE.info(f"Speakers for {doc_id}: {names}", document=doc_id)
+    if report["unassigned_segments"]:
+        CONSOLE.warn(
+            f"{report['unassigned_segments']} segment(s) lost their speaker "
+            f"because {', '.join(report['removed_speakers'])} was removed.",
+            document=doc_id,
+        )
+    return {
+        "speakers": report["speakers"],
+        "unassigned_segments": report["unassigned_segments"],
+        "removed_speakers": report["removed_speakers"],
+        "transcript": doc,
+        "summary": summary(doc),
+    }
+
+
+@app.post("/api/projects/{slug}/documents/{doc_id}/assign")
+async def api_assign_speaker(slug: str, doc_id: str, request: Request):
+    """Tag a run of segments with a speaker. This is the one-click turn tag."""
+    payload = await request.json()
+    segment_ids = payload.get("segments") or []
+    speaker_id = str(payload.get("speaker_id") or "")
+
+    doc = _load_doc_or_404(slug, doc_id)
+    try:
+        changed = assign_speaker(doc, segment_ids, speaker_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if changed:
+        projects.save_transcript(
+            slug, doc_id, doc, revision=False,
+            keep=int(SETTINGS.get("autosave_revisions") or 20),
+        )
+    return {
+        "changed": changed,
+        "segments": [
+            {"id": s["id"], "speaker_id": s.get("speaker_id", ""),
+             "speaker": s.get("speaker", "")}
+            for s in doc["segments"]
+        ],
+        "summary": summary(doc),
+    }
+
+
+@app.post("/api/projects/{slug}/documents/{doc_id}/proofread")
+async def api_proofread(slug: str, doc_id: str, request: Request):
+    """Check segments for misspellings and transcription artefacts.
+
+    The project glossary and the document's accepted words are folded in, so
+    a study's own vocabulary stops being flagged the moment it is recorded on
+    the project page.
+    """
+    payload = await request.json()
+    segments = payload.get("segments")
+    if not isinstance(segments, list):
+        raise HTTPException(status_code=400, detail="Expected a 'segments' list.")
+
+    settings = SETTINGS.all()
+    if not settings.get("proofread_spelling") and not settings.get("proofread_artefacts"):
+        return {"issues": {}, "enabled": False}
+
+    try:
+        project = projects.load_project(slug)
+    except projects.ProjectError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    doc = projects.load_transcript(slug, doc_id) or {}
+    extra = proofread.extra_words(
+        project.get("glossary"),
+        settings.get("initial_prompt"),
+        settings.get("hotwords"),
+        doc.get("dictionary"),
+        [s.get("name") for s in doc.get("speakers") or []],
+        [s.get("short") for s in doc.get("speakers") or []],
+        project.get("participant_scheme"),
+    )
+
+    issues = proofread.check_segments(
+        segments,
+        extra=extra,
+        spelling=bool(settings.get("proofread_spelling", True)),
+        artefacts=bool(settings.get("proofread_artefacts", True)),
+        suggestions=int(settings.get("proofread_suggestions") or 0),
+    )
+    return {
+        "issues": issues,
+        "enabled": True,
+        "dictionary": proofread.status(),
+    }
+
+
+@app.post("/api/projects/{slug}/documents/{doc_id}/dictionary")
+async def api_add_to_dictionary(slug: str, doc_id: str, request: Request):
+    """Accept a word so it stops being flagged.
+
+    Scope 'document' keeps it to this transcript; 'project' writes it into the
+    project glossary, where it also improves Whisper's own spelling of the term
+    on any file transcribed afterwards.
+    """
+    payload = await request.json()
+    word = str(payload.get("word") or "").strip()
+    scope = str(payload.get("scope") or "document")
+    if not word:
+        raise HTTPException(status_code=400, detail="No word was supplied.")
+
+    if scope == "project":
+        project = projects.load_project(slug)
+        glossary = (project.get("glossary") or "").strip()
+        terms = [t.strip() for t in glossary.split(",") if t.strip()]
+        if word not in terms:
+            terms.append(word)
+        projects.save_project(slug, {"glossary": ", ".join(terms)})
+        CONSOLE.info(f"Added '{word}' to the project glossary.", project=slug)
+    else:
+        doc = _load_doc_or_404(slug, doc_id)
+        accepted = doc.setdefault("dictionary", [])
+        if word not in accepted:
+            accepted.append(word)
+            projects.save_transcript(
+                slug, doc_id, doc, revision=False,
+                keep=int(SETTINGS.get("autosave_revisions") or 20),
+            )
+        CONSOLE.info(f"Accepted '{word}' for this document.", document=doc_id)
+
+    # The cached results were computed without this word, so drop them.
+    proofread.CACHE.clear()
+    return {"word": word, "scope": scope}
 
 
 @app.post("/api/projects/{slug}/documents/{doc_id}/retimestamp")
