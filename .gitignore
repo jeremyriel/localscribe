@@ -16,6 +16,7 @@ models/
 # --- Local environment and state -----------------------------------------
 .venv/
 .deps-hash
+.pyruntime/
 
 # Development record: kept locally for context, deliberately not published.
 savestate.md

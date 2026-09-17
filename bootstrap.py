@@ -28,6 +28,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.error
 import urllib.request
@@ -40,6 +41,7 @@ LOGS = ROOT / "logs"
 PIDFILE = LOGS / "localscribe.pid"
 REQUIREMENTS = ROOT / "requirements.txt"
 DEPS_HASH = VENV / ".deps-hash"
+PYRUNTIME = ROOT / ".pyruntime"
 
 APP_SIGNATURE = "localscribe/instance/v1"
 DEFAULT_PORT = 43707
@@ -48,6 +50,15 @@ HOST = "127.0.0.1"
 # CPython versions with wheels for the whole dependency set, best first.
 SUPPORTED = ((3, 13), (3, 12), (3, 11), (3, 10))
 IS_WINDOWS = os.name == "nt"
+
+# Prebuilt, self-contained CPython used when no supported interpreter is
+# installed. Same builds `uv python install` uses, so no system installer,
+# admin rights or package manager is needed. Only 3.10 is left out: that
+# build family is no longer published for new releases.
+PBS_RELEASES_API = (
+    "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+)
+PBS_PREFERRED = tuple(v for v in SUPPORTED if v != (3, 10))
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +148,96 @@ def find_supported_interpreter() -> str | None:
     return None
 
 
+def _pbs_triple() -> str | None:
+    """python-build-standalone target triple for this machine, if published."""
+    system = platform.system()
+    machine = platform.machine().lower()
+    arch64 = machine in ("arm64", "aarch64")
+
+    if system == "Darwin":
+        return f"{'aarch64' if arch64 else 'x86_64'}-apple-darwin"
+    if system == "Linux":
+        return f"{'aarch64' if arch64 else 'x86_64'}-unknown-linux-gnu"
+    if system == "Windows":
+        return f"{'aarch64' if arch64 else 'x86_64'}-pc-windows-msvc"
+    return None
+
+
+def _pbs_python_path(install_dir: Path) -> Path:
+    return install_dir / "python" / ("python.exe" if IS_WINDOWS else "bin/python3")
+
+
+def download_supported_python() -> str | None:
+    """Fetch a self-contained CPython build when none is installed locally.
+
+    Downloads once per version into .pyruntime/, which is reused on every
+    later run and by every project on this machine that asks for the same
+    version, so this only costs time on a machine's very first run.
+    """
+    triple = _pbs_triple()
+    if triple is None:
+        return None
+
+    try:
+        with urllib.request.urlopen(PBS_RELEASES_API, timeout=15) as response:
+            release = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as exc:
+        step(f"Could not reach GitHub to look up a Python build: {exc}")
+        return None
+
+    assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
+
+    for major, minor in PBS_PREFERRED:
+        prefix = f"cpython-{major}.{minor}."
+        candidates = [
+            name for name in assets
+            if name.startswith(prefix) and triple in name
+            and "freethreaded" not in name and name.endswith(".tar.gz")
+        ]
+        # Prefer the stripped build (smaller download, debug symbols removed).
+        candidates.sort(key=lambda n: "stripped" not in n)
+        if not candidates:
+            continue
+        asset_name = candidates[0]
+
+        install_dir = PYRUNTIME / asset_name.removesuffix(".tar.gz")
+        python = _pbs_python_path(install_dir)
+        if python.exists():
+            step(f"Using previously downloaded Python at {python}")
+            return str(python)
+
+        say(f"  No supported Python is installed. Downloading {major}.{minor} "
+            f"(build {asset_name})...")
+        try:
+            archive, _ = urllib.request.urlretrieve(assets[asset_name])
+        except (urllib.error.URLError, OSError) as exc:
+            step(f"Download failed: {exc}")
+            continue
+
+        try:
+            install_dir.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(archive) as tar:
+                if hasattr(tarfile, "data_filter"):
+                    tar.extractall(install_dir, filter="data")
+                else:
+                    tar.extractall(install_dir)
+        except Exception as exc:
+            step(f"Could not extract the downloaded Python build: {exc}")
+            shutil.rmtree(install_dir, ignore_errors=True)
+            continue
+        finally:
+            os.unlink(archive)
+
+        if not IS_WINDOWS and python.exists():
+            python.chmod(0o755)
+
+        if python.exists():
+            step("Python downloaded and ready.")
+            return str(python)
+
+    return None
+
+
 def reexec_with_supported_interpreter() -> None:
     current = ".".join(str(p) for p in sys.version_info[:3])
     wanted = ", ".join(f"{a}.{b}" for a, b in SUPPORTED)
@@ -144,18 +245,22 @@ def reexec_with_supported_interpreter() -> None:
     say(f"  This is Python {current}, which the transcription engine does not")
     say(f"  support yet. Looking for Python {wanted}...")
 
-    exe = find_supported_interpreter()
+    exe = find_supported_interpreter() or download_supported_python()
     if exe is None:
         fail(
-            f"Python {current} is not supported, and no supported version was found.\n"
+            f"Python {current} is not supported, and no supported version could\n"
+            f"be found or downloaded.\n"
             f"\n"
             f"Local Scribe needs one of: Python {wanted}.\n"
             f"CTranslate2, the runtime that executes the Whisper model, does not\n"
             f"publish a build for Python 3.14 yet.\n"
             f"\n"
-            f"Install Python 3.13 from https://www.python.org/downloads/ and run\n"
-            f"this launcher again. An existing 3.10 to 3.13 installation is found\n"
-            f"automatically; nothing needs to be uninstalled."
+            f"Local Scribe tries to download a supported Python automatically,\n"
+            f"which needs an internet connection on this first run. If that\n"
+            f"failed, install Python 3.13 yourself from\n"
+            f"https://www.python.org/downloads/ and run this launcher again. An\n"
+            f"existing 3.10 to 3.13 installation is found automatically; nothing\n"
+            f"needs to be uninstalled."
         )
 
     step(f"Using {exe}")
@@ -186,7 +291,14 @@ def ensure_venv() -> Path:
         say("  First run: creating an isolated Python environment in .venv")
         say("  (this keeps Local Scribe's packages away from your other projects)")
         try:
-            venv.EnvBuilder(with_pip=True, clear=False, upgrade=False).create(str(VENV))
+            # symlinks=True matches the stdlib `python -m venv` CLI default on
+            # POSIX. Without it, EnvBuilder copies the interpreter binary,
+            # which breaks relocatable builds (python.org's macOS installer,
+            # python-build-standalone / `uv python install`, etc.) that bake
+            # in a prefix only resolvable through the symlink's real path.
+            venv.EnvBuilder(
+                with_pip=True, clear=False, upgrade=False, symlinks=not IS_WINDOWS,
+            ).create(str(VENV))
         except Exception as exc:
             fail(
                 f"The virtual environment could not be created: {exc}\n"

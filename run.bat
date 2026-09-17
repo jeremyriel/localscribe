@@ -30,8 +30,24 @@ python -c "import sys" >nul 2>&1 && (
   goto done
 )
 
+REM No Python anywhere on this machine: bootstrap.py's own download logic
+REM needs an interpreter to run it, so fetch one directly with PowerShell
+REM first. Same self-contained CPython build (python-build-standalone, what
+REM `uv` installs) that bootstrap.py downloads; cached under .pyruntime\,
+REM shared with bootstrap.py's own copy of this logic.
+echo   No Python found. Trying to download one automatically...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\fetch_python.ps1" > "%TEMP%\localscribe_fetch_python.txt"
+set /p FETCHED_PYTHON=<"%TEMP%\localscribe_fetch_python.txt"
+del "%TEMP%\localscribe_fetch_python.txt" >nul 2>&1
+
+if not "%FETCHED_PYTHON%"=="" if exist "%FETCHED_PYTHON%" (
+  "%FETCHED_PYTHON%" bootstrap.py %*
+  goto done
+)
+
 echo.
-echo   Local Scribe could not start: Python was not found.
+echo   Local Scribe could not start: no Python interpreter was found, and one
+echo   could not be downloaded automatically (no internet connection?).
 echo.
 echo   Install Python 3.13 from https://www.python.org/downloads/
 echo   During installation, tick "Add python.exe to PATH".
