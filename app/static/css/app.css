@@ -31,6 +31,15 @@
 
 * { box-sizing: border-box; }
 
+/* The HTML `hidden` attribute must beat any layout display we set.
+   The browser's own [hidden] { display: none } rule lives in the user-agent
+   stylesheet, and ANY author rule that sets `display` overrides it -- author
+   styles win over UA styles regardless of specificity. So a component styled
+   `display: flex` or `display: grid` silently ignores `el.hidden = true`.
+   This rule restores the expected behaviour for every element at once, rather
+   than requiring each component to remember to handle it. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;

@@ -122,6 +122,7 @@ the repetition penalty slightly, then re-transcribe.
 ```
 .venv/Scripts/python.exe -m tests.test_realign      # re-timestamping
 .venv/Scripts/python.exe -m tests.test_exporters     # captions and exports
+.venv/Scripts/python.exe -m tests.test_assets        # front-end asset guards
 ```
 
 On macOS and Linux use `.venv/bin/python` instead.
