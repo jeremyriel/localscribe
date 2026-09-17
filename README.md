@@ -128,6 +128,17 @@ On macOS and Linux use `.venv/bin/python` instead.
 
 ## Licensing
 
-Whisper (OpenAI), faster-whisper, CTranslate2, python-docx and Silero VAD are
-MIT licensed. PyAV is BSD licensed and links FFmpeg. Model weights are
-redistributed by their publishers under their own terms.
+Local Scribe is released under the **MIT licence**, copyright © 2026 Jeremy
+Riel, UIC TRAILblazer Lab. See [LICENSE](LICENSE). You may use, modify and
+redistribute it freely, including commercially, provided the copyright notice
+and licence text are retained; it comes with no warranty.
+
+If you use Local Scribe in published research, a citation of the software and
+the TRAILblazer Lab is appreciated but not required.
+
+### Components
+
+Whisper (OpenAI), faster-whisper, CTranslate2, python-docx, Silero VAD,
+FastAPI, Starlette, uvicorn and Jinja2 are MIT or BSD licensed. PyAV is BSD
+licensed and links FFmpeg, which is LGPL/GPL depending on build. Model weights
+are redistributed by their publishers under their own terms.
