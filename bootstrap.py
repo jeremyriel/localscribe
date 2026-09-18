@@ -461,7 +461,18 @@ def describe_port_holder(port: int) -> str:
 
 def enforce_single_instance(port: int) -> None:
     """Ensure exactly one Local Scribe, and never kill anything else."""
-    running = identify_listener(port)
+    # Retry the identity probe a few times before concluding the port holder
+    # is a foreign process: a Local Scribe instance that is still starting up
+    # (loading a model, mid-shutdown from a previous run, ...) may not answer
+    # the very first HTTP request even though the TCP port is already open,
+    # and misjudging that as "not Local Scribe" would wrongly refuse to start
+    # rather than doing the one thing this function exists to do.
+    running = None
+    for attempt in range(4):
+        running = identify_listener(port)
+        if running is not None or not port_in_use(port):
+            break
+        time.sleep(0.5)
 
     if running is not None:
         pid = int(running.get("pid") or 0)
