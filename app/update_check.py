@@ -192,7 +192,12 @@ def apply_git_update() -> dict:
     status = _run_git("status", "--porcelain")
     if status.returncode != 0:
         return {"ok": False, "message": f"git status failed: {status.stderr.strip()}"}
-    if status.stdout.strip():
+    # Only tracked changes ("??" is an untracked file - a fast-forward pull
+    # never touches those, so refusing over one would just be annoying: a
+    # stray note file sitting in the folder, or this Claude Code session's
+    # own .claude/ directory, would otherwise permanently block updating).
+    dirty = [line for line in status.stdout.splitlines() if not line.startswith("??")]
+    if dirty:
         return {"ok": False, "message": (
             "This checkout has local changes that haven't been committed, "
             "so pulling could lose them. Resolve that first (commit, stash, "
