@@ -59,6 +59,25 @@ def resolve_port() -> int:
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _default_data_root() -> Path:
+    """Where user data (projects, models, logs, settings) lives.
+
+    Defaults to ROOT, matching run.command/.sh/.bat, where the whole app is
+    one folder the user already owns. The packaged desktop installers (see
+    packaging/) set LOCALSCRIBE_DATA_DIR instead, to a proper per-user data
+    directory (e.g. ~/Library/Application Support/Local Scribe on macOS):
+    an installed .app/Program Files folder is not reliably writable, gets
+    wiped on every update or reinstall, and - once the bundle is
+    code-signed - writing inside it breaks the signature seal. Research
+    data has to survive all of that.
+    """
+    override = os.environ.get("LOCALSCRIBE_DATA_DIR")
+    return Path(override).expanduser().resolve() if override else ROOT
+
+
+DATA_ROOT = _default_data_root()
+
+
 @dataclass(frozen=True)
 class AppPaths:
     root: Path = ROOT
@@ -66,11 +85,11 @@ class AppPaths:
     static: Path = ROOT / "app" / "static"
     templates: Path = ROOT / "app" / "templates"
     assets: Path = ROOT / "assets"
-    models: Path = ROOT / "models"
-    projects: Path = ROOT / "projects"
-    logs: Path = ROOT / "logs"
-    settings_file: Path = ROOT / "settings.json"
-    pidfile: Path = ROOT / "logs" / "localscribe.pid"
+    models: Path = DATA_ROOT / "models"
+    projects: Path = DATA_ROOT / "projects"
+    logs: Path = DATA_ROOT / "logs"
+    settings_file: Path = DATA_ROOT / "settings.json"
+    pidfile: Path = DATA_ROOT / "logs" / "localscribe.pid"
     version_file: Path = ROOT / "VERSION"
 
     def ensure(self) -> None:

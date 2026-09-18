@@ -17,6 +17,13 @@ faster-whisper>=1.1.0,<2.0
 mlx>=0.18.0 ; sys_platform == "darwin" and platform_machine == "arm64"
 mlx-whisper>=0.4.0 ; sys_platform == "darwin" and platform_machine == "arm64"
 
+# Native app window for the packaged desktop installers (app/desktop.py,
+# launched via `bootstrap.py --desktop`). Unused by the ordinary
+# run.command/run.sh/run.bat path, which still opens a browser tab - kept
+# unconditional rather than optional since it's a small, pure-Python-ish
+# package with no heavy transitive dependencies.
+pywebview>=5.0
+
 # Exports
 python-docx>=1.1.0,<2.0
 

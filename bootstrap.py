@@ -36,12 +36,23 @@ import venv
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-VENV = ROOT / ".venv"
-LOGS = ROOT / "logs"
+
+# Mirrors app/config.py's DATA_ROOT: everything this script itself writes
+# (the venv, logs, the downloaded interpreter cache) moves out of ROOT when
+# LOCALSCRIBE_DATA_DIR is set, same as app/main.py's projects/models/etc
+# do - set by the packaged desktop installers (packaging/), which cannot
+# rely on their own installed folder being writable or persistent across
+# updates. Source/dev usage (run.command/.sh/.bat) leaves this unset, so
+# ROOT is unchanged from today.
+_data_override = os.environ.get("LOCALSCRIBE_DATA_DIR")
+DATA_ROOT = Path(_data_override).expanduser().resolve() if _data_override else ROOT
+
+VENV = DATA_ROOT / ".venv"
+LOGS = DATA_ROOT / "logs"
 PIDFILE = LOGS / "localscribe.pid"
 REQUIREMENTS = ROOT / "requirements.txt"
 DEPS_HASH = VENV / ".deps-hash"
-PYRUNTIME = ROOT / ".pyruntime"
+PYRUNTIME = DATA_ROOT / ".pyruntime"
 
 APP_SIGNATURE = "localscribe/instance/v1"
 DEFAULT_PORT = 43707
@@ -547,7 +558,7 @@ def open_browser(port: int, delay: float = 2.0) -> None:
     threading.Thread(target=go, daemon=True).start()
 
 
-def run_server(python: Path, port: int) -> int:
+def run_server(python: Path, port: int, module: str = "app.server") -> int:
     environment = dict(os.environ)
     environment["LOCALSCRIBE_PORT"] = str(port)
     environment.setdefault("PYTHONUNBUFFERED", "1")
@@ -559,7 +570,7 @@ def run_server(python: Path, port: int) -> int:
 
     try:
         return subprocess.call(
-            [str(python), "-m", "app.server"], cwd=str(ROOT), env=environment
+            [str(python), "-m", module], cwd=str(ROOT), env=environment
         )
     except KeyboardInterrupt:
         say()
@@ -588,6 +599,9 @@ def main() -> int:
                         help=f"override the port (default {DEFAULT_PORT})")
     parser.add_argument("--reinstall", action="store_true",
                         help="force dependency reinstallation")
+    parser.add_argument("--desktop", action="store_true",
+                        help="open a native app window instead of a browser tab "
+                             "(used by the packaged installers)")
     args = parser.parse_args()
 
     if args.port:
@@ -611,6 +625,11 @@ def main() -> int:
     python = ensure_venv()
     install_dependencies(python)
     enforce_single_instance(port)
+
+    if args.desktop:
+        # app.desktop shows its own window once the server it starts is
+        # ready; there is nothing here for bootstrap.py to open itself.
+        return run_server(python, port, module="app.desktop")
 
     if not args.no_browser:
         open_browser(port)

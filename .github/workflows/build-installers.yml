@@ -1,0 +1,120 @@
+name: Build desktop installers
+
+# Builds the macOS .dmg, Windows .exe installer, and Linux .AppImage on
+# their native runners and attaches them to the triggering GitHub Release.
+# All three are unsigned (see packaging/*/README notes and the project
+# README's "Allowing the launcher to run" section) - signing steps can be
+# added to the macos/windows jobs later without touching anything else.
+#
+# Also runs on every push/PR as a build-only smoke test (no signing, no
+# release upload) so packaging regressions are caught before a release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "bootstrap.py"
+      - "requirements.txt"
+      - "VERSION"
+      - "packaging/**"
+      - ".github/workflows/build-installers.yml"
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .app + .dmg
+        run: packaging/macos/build.sh
+      - name: Smoke test - launch and check the server responds
+        run: |
+          "dist/macos/Local Scribe.app/Contents/MacOS/LocalScribe" &
+          for i in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:43707/api/instance > /dev/null; then
+              echo "Server responded after ${i}x2s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Server never responded" >&2; exit 1
+      - name: Stop the app
+        if: always()
+        run: pkill -f "Local Scribe.app" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/macos/*.dmg
+      - if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/macos/*.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $env:Path += ";C:\Program Files (x86)\Inno Setup 6"
+          packaging\windows\build.ps1
+      - name: Smoke test - install silently, launch, check the server responds
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\windows\*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Local Scribe\LocalScribe.bat"
+          Start-Process -FilePath $exe
+          $ok = $false
+          for ($i = 0; $i -lt 120; $i++) {
+            try {
+              Invoke-RestMethod -Uri "http://127.0.0.1:43707/api/instance" -TimeoutSec 2 | Out-Null
+              $ok = $true; break
+            } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ok) { throw "Server never responded" }
+      - name: Stop the app
+        if: always()
+        shell: pwsh
+        run: Get-Process pythonw -ErrorAction SilentlyContinue | Stop-Process -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/windows/*.exe
+      - if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/windows/*.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build AppImage
+        run: packaging/linux/build-appimage.sh
+      - name: Smoke test - launch (server only; no display to test the window itself)
+        run: |
+          ./dist/linux/*.AppImage --appimage-extract-and-run &
+          for i in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:43707/api/instance > /dev/null; then
+              echo "Server responded after ${i}x2s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Server never responded" >&2; exit 1
+      - name: Stop the app
+        if: always()
+        run: pkill -f app.desktop || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/linux/*.AppImage
+      - if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/linux/*.AppImage

@@ -18,6 +18,11 @@ models/
 .deps-hash
 .pyruntime/
 
+# --- Desktop installer build output ---------------------------------------
+# packaging/*/build.sh|.ps1 outputs, and their staging directories.
+/dist/
+packaging/*/build/
+
 # Development record: kept locally for context, deliberately not published.
 savestate.md
 

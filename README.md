@@ -59,6 +59,30 @@ seconds. A browser opens automatically at <http://127.0.0.1:43707>.
 Running the launcher again shuts down any existing instance first, so only one
 copy is ever running.
 
+### Installable desktop apps
+
+`packaging/` builds a proper installer for each platform - a `.dmg` on
+macOS, an `.exe` installer on Windows, an `.AppImage` on Linux - instead of
+cloning the repo and running a script. The installed app opens in its own
+window (not a browser tab), and stores your projects, models, and settings
+in your normal per-user data directory rather than inside the app itself,
+so they survive an update or reinstall.
+
+```
+packaging/macos/build.sh              # -> dist/macos/*.dmg
+packaging/windows/build.ps1           # -> dist/windows/*.exe (needs Inno Setup)
+packaging/linux/build-appimage.sh     # -> dist/linux/*.AppImage
+```
+
+These installers are **not currently signed** - the same Gatekeeper/
+SmartScreen prompt described below still applies the first time you open
+one, since that requires an ongoing, paid, identity-verified code-signing
+setup (an Apple Developer ID + notarization on macOS, a Windows code-signing
+certificate or Microsoft Trusted Signing on Windows) that hasn't been set
+up yet. Linux needs no signing at all. `.github/workflows/build-installers.yml`
+builds and smoke-tests all three on every push, and attaches them to a
+GitHub Release when one is published.
+
 ### Giving permissions for the launcher to run
 
 The first time you run one of these scripts, your operating system may block
