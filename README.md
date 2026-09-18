@@ -1,6 +1,8 @@
 # Local Scribe
 
-## Free and open-source AI-based automated audio transcription, captioning, and easy transcript editing software for researchers. Retain full data custody on your own computer: no transferring to any third parties for transcription.
+## Free and open-source AI-based automated audio transcription, captioning, and easy transcript editing software for researchers. 
+
+## Retain full data custody on your own computer: no transferring to any third parties for transcription.
 
 <p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
 
