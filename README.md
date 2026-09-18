@@ -50,6 +50,26 @@ seconds. A browser opens automatically at <http://127.0.0.1:43707>.
 Running the launcher again shuts down any existing instance first, so only one
 copy is ever running.
 
+### Allowing the launcher to run
+
+The first time you run one of these scripts, your operating system may block
+it as an unrecognised program, since it isn't signed by a registered
+developer. This only needs to be done once per machine.
+
+- **macOS:** Double-clicking `run.command` may show *"cannot be opened
+  because it is from an unidentified developer."* Right-click (or
+  Control-click) `run.command` and choose **Open**, then confirm **Open** in
+  the dialog that appears — after that, double-clicking works normally. If
+  Local Scribe was downloaded as a ZIP rather than with `git clone`, also run
+  `chmod +x run.command run.sh` once in Terminal first, so the scripts are
+  marked executable.
+- **Windows:** Double-clicking `run.bat` may trigger a **"Windows protected
+  your PC"** SmartScreen warning. Click **More info**, then **Run anyway**.
+  Antivirus software may also flag the first run, since it downloads and
+  installs Python packages; this is expected and safe to allow.
+- **Linux:** `run.sh` needs execute permission the first time:
+  `chmod +x run.sh`, then run it with `./run.sh`.
+
 ### Requirements
 
 - **Python 3.10 to 3.13.** Python 3.14 is not yet usable because CTranslate2,
@@ -58,6 +78,33 @@ copy is ever running.
 - No `ffmpeg` installation is needed; media handling is built in.
 - A network connection is needed **once**, to install packages and download a
   model. After that the app runs fully offline.
+
+### Windows, macOS and Linux: hardware acceleration
+
+Local Scribe runs on Windows, macOS and Linux, and automatically uses
+whichever GPU acceleration your machine actually has — nothing to configure
+by hand.
+
+- **Windows and Linux (PC):** Transcription runs through CTranslate2, which
+  uses an NVIDIA GPU via CUDA when one is present and its support libraries
+  are installed, and falls back to CPU otherwise. AI Settings shows exactly
+  what was detected and has a one-click **Install GPU support** button when
+  the CUDA libraries are missing.
+- **macOS (Apple Silicon):** On M-series Macs, Local Scribe takes advantage
+  of Apple's **MLX** framework to run the Whisper model directly on the
+  GPU, through the Mac's **unified memory architecture** — the same memory
+  pool the CPU uses, so nothing has to be copied back and forth between
+  separate CPU and GPU memory and there is no fixed VRAM ceiling to plan
+  around. This gives Apple Silicon Macs genuine GPU-accelerated
+  transcription with no discrete graphics card required, typically several
+  times faster than CPU-only transcription. AI Settings offers a matching
+  set of "(Apple GPU)" models when MLX is available, and recommends one
+  sized to your Mac's memory. Intel Macs, and Apple Silicon Macs where MLX
+  isn't installed, fall back to CPU automatically.
+
+Either way, AI Settings recommends a model and device for your specific
+hardware and explains its reasoning; you can always override it, including
+forcing CPU-only if you ever want to.
 
 ## First use
 
