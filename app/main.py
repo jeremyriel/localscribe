@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import catalog, exporters, media, proofread, projects
+from . import catalog, exporters, media, proofread, projects, update_check
 from .config import (
     APP_NAME,
     HOST,
@@ -61,6 +61,7 @@ INSTANCE_TOKEN = new_instance_token()
 
 PATHS.ensure()
 install_offline_guard()
+update_check.refresh_state_async()
 
 app = FastAPI(title=APP_NAME, version=app_version(), docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(PATHS.static)), name="static")
@@ -171,6 +172,7 @@ def base_context(request: Request, **extra) -> dict:
         "instance_token": INSTANCE_TOKEN,
         "engine": ENGINE.status(),
         "low_confidence": LOW_CONFIDENCE,
+        "update": update_check.state(),
     }
     context.update(extra)
     return context
@@ -253,6 +255,7 @@ async def page_settings(request: Request):
             values=SETTINGS.all(),
             catalog=catalog.catalog_payload(hardware),
             advanced_raw=json.dumps(SETTINGS.get("advanced_raw") or {}, indent=2),
+            is_git_checkout=update_check.is_git_checkout(),
         ),
     )
 
@@ -510,6 +513,46 @@ async def api_install_gpu_support():
             + " ".join(hardware.get("warnings") or [])
         )
     return {"engine": ENGINE.status(), "hardware": hardware}
+
+
+@app.get("/api/update-check")
+async def api_update_check():
+    return {
+        "update": update_check.state(),
+        "is_git_checkout": update_check.is_git_checkout(),
+    }
+
+
+@app.post("/api/update-check/refresh")
+async def api_update_check_refresh():
+    if SETTINGS.get("offline_lock"):
+        raise HTTPException(
+            status_code=409,
+            detail="The offline lock is engaged, so Local Scribe cannot check "
+                   "for updates. Turn it off first.",
+        )
+    state = update_check.refresh_state()
+    return {"update": state, "is_git_checkout": update_check.is_git_checkout()}
+
+
+@app.post("/api/update/apply")
+async def api_update_apply():
+    if not update_check.is_git_checkout():
+        raise HTTPException(
+            status_code=409,
+            detail="This is a packaged install, not a git checkout - download "
+                   "the new version instead of updating in place.",
+        )
+    if SETTINGS.get("offline_lock"):
+        raise HTTPException(
+            status_code=409,
+            detail="The offline lock is engaged, so Local Scribe cannot pull "
+                   "an update. Turn it off first.",
+        )
+    result = update_check.apply_git_update()
+    if not result["ok"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
 
 
 # ---------------------------------------------------------------------------

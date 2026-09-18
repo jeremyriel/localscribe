@@ -149,6 +149,67 @@
   </div>
 </div>
 
+<!-- Updates -->
+<div class="card" id="updates">
+  <h2>Updates</h2>
+  <p class="card-note">
+    Checked once when Local Scribe starts, against GitHub - the same one
+    deliberate network request the model catalogue makes, nothing is ever
+    downloaded or installed without a click here.
+  </p>
+
+  {% if values.offline_lock %}
+  <div class="notice notice-warn">
+    <strong>Offline lock is engaged</strong>
+    Update checks are disabled while it's on, the same as model downloads.
+  </div>
+  {% endif %}
+
+  <dl>
+    <dt>You have</dt><dd class="mono" id="update-current">{{ update.current }}</dd>
+    <dt>Latest known</dt>
+    <dd class="mono" id="update-latest">
+      {% if update.latest %}{{ update.latest }}{% else %}not checked yet{% endif %}
+    </dd>
+  </dl>
+
+  <div id="update-status">
+    {% if update.available %}
+      <div class="notice notice-ok">
+        <strong>Version {{ update.latest }} is available.</strong>
+        {% if is_git_checkout %}
+          Pull the latest source and restart Local Scribe to finish.
+        {% else %}
+          Download and run the new installer - it keeps your projects,
+          models, and settings, which live outside the app itself.
+        {% endif %}
+      </div>
+    {% elif update.checked %}
+      <div class="notice notice-ok">Local Scribe is up to date.</div>
+    {% endif %}
+  </div>
+
+  <div class="row" style="margin-top:.7rem">
+    <button type="button" class="btn btn-small btn-quiet" id="check-updates"
+            {% if values.offline_lock %}disabled{% endif %}>
+      Check now
+    </button>
+    {% if is_git_checkout %}
+      <button type="button" class="btn btn-small" id="apply-update"
+              {% if not update.available or values.offline_lock %}disabled{% endif %}>
+        Update now
+      </button>
+    {% else %}
+      <a class="btn btn-small" id="download-update"
+         href="{{ update.download_url or update.release_url or 'https://github.com/jeremyriel/localscribe' }}"
+         target="_blank" rel="noopener"
+         {% if not update.available %}style="display:none"{% endif %}>
+        Download the new version
+      </a>
+    {% endif %}
+  </div>
+</div>
+
 <!-- The settings form itself, generated from the schema -->
 <form id="settings-form">
   {% for group in schema %}

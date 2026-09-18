@@ -392,14 +392,20 @@ SETTINGS_SCHEMA = [
         "title": "Privacy and network",
         "blurb": (
             "Local Scribe makes no outbound request except a deliberate model "
-            "download. Offline Lock enforces that at the process level."
+            "download or update check. Offline Lock enforces that at the "
+            "process level."
         ),
         "fields": [
             _f("offline_lock", "Offline lock", "bool", False,
                "When on, every non-loopback network call is blocked inside this "
-               "process, including model downloads. Turn it on once your models "
-               "are downloaded. It is enforced by refusing outbound sockets, "
-               "not merely by convention."),
+               "process, including model downloads and update checks. Turn it "
+               "on once your models are downloaded. It is enforced by refusing "
+               "outbound sockets, not merely by convention."),
+            _f("check_for_updates", "Check for updates", "bool", True,
+               "Once per launch, asks GitHub whether a newer version of Local "
+               "Scribe has been released, and tells you here if so - it never "
+               "downloads or installs anything on its own. Has no effect while "
+               "the offline lock is on."),
             _f("keep_preview_audio", "Keep browser preview audio", "bool", True,
                "Formats such as .mkv and .avi cannot play in a browser, so a "
                "compact .m4a companion is created for the editor. Turning this "

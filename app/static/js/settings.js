@@ -193,6 +193,55 @@
     });
   }
 
+  /* ---------------------------------------------------------------- updates */
+
+  const checkUpdates = document.getElementById('check-updates');
+  if (checkUpdates) {
+    checkUpdates.addEventListener('click', async () => {
+      checkUpdates.disabled = true;
+      checkUpdates.textContent = 'Checking...';
+      try {
+        const result = await LS.post('/api/update-check/refresh');
+        LS.toast(
+          result.update.available
+            ? `Version ${result.update.latest} is available.`
+            : 'Local Scribe is up to date.',
+          'ok', 6000);
+        location.reload();
+      } catch (err) {
+        LS.toast(err.message, 'error', 10000);
+        checkUpdates.disabled = false;
+        checkUpdates.textContent = 'Check now';
+      }
+    });
+  }
+
+  const applyUpdate = document.getElementById('apply-update');
+  if (applyUpdate) {
+    applyUpdate.addEventListener('click', async () => {
+      if (!confirm(
+        'Pull the latest version from GitHub?\n\n' +
+        "This only updates this folder's source code - your projects, " +
+        'models, and settings are untouched. Local Scribe needs to be ' +
+        'restarted afterwards to finish.'
+      )) return;
+
+      applyUpdate.disabled = true;
+      applyUpdate.textContent = 'Updating...';
+      if (window.LSConsole) LSConsole.open();
+
+      try {
+        const result = await LS.post('/api/update/apply');
+        LS.toast(result.message, 'ok', 12000);
+      } catch (err) {
+        LS.toast(err.message, 'error', 14000);
+      } finally {
+        applyUpdate.disabled = false;
+        applyUpdate.textContent = 'Update now';
+      }
+    });
+  }
+
   /* -------------------------------------------------------- model actions */
 
   const modelTable = document.querySelector('.model-table');

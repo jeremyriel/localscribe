@@ -33,6 +33,13 @@
       </span>
     {% endif %}
 
+    {% if update.available %}
+      <a class="lock-badge update-badge" href="/settings#updates"
+         title="Local Scribe {{ update.latest }} is available - you have {{ update.current }}.">
+        Update available ({{ update.latest }})
+      </a>
+    {% endif %}
+
     <!-- Persistent AI status indicator, refreshed by the heartbeat. -->
     <button type="button" id="engine-pill" class="pill pill-unknown"
             title="Click for engine details" aria-live="polite">

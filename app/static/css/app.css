@@ -98,6 +98,11 @@ hr { border: 0; border-top: 1px solid var(--line-2); margin: 1.25rem 0; }
   padding: .25rem .5rem; border-radius: 999px;
   background: var(--ok-soft); color: var(--ok); border: 1px solid #c3e3d3;
 }
+.update-badge {
+  background: var(--warn-soft); color: var(--warn); border-color: #eddba8;
+  text-decoration: none; cursor: pointer;
+}
+.update-badge:hover { text-decoration: underline; }
 
 /* Persistent engine status pill */
 .pill {
