@@ -485,9 +485,17 @@ canvas.ribbon {
 /* ------------------------------------------------- find bar and squiggles */
 
 .findbar {
+  /* Stays on screen while scrolling through a long transcript instead of
+     scrolling away with the rest of the card, so replace-all on segment
+     400 doesn't mean losing the bar you're using to get there. --findbar-top
+     is set in JS (editor.js) to sit just below the sticky player card,
+     whose own height varies with window width; 3.6rem here is only the
+     fallback before that measurement runs. */
+  position: sticky; top: var(--findbar-top, 3.6rem); z-index: 21;
   border: 1px solid var(--line); border-radius: var(--radius-s);
   background: var(--surface-2); padding: .5rem .6rem; margin-bottom: .7rem;
   display: flex; flex-direction: column; gap: .4rem;
+  box-shadow: var(--shadow);
 }
 .find-row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
 .find-row input[type=text] { flex: 1 1 200px; min-width: 150px; }

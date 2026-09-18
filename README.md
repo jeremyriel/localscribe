@@ -8,6 +8,8 @@
 
 An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org); Jeremy Riel, PhD.
 
+**Current version: 1.01** — see [Versioning](#versioning) below.
+
 Given the emerging capabilities of open-source language models, The UIC TRAILblazer Lab presents a
 free, open-source, and AI-based automated transcription app that can transcribe audio and
 video file sound into workable transcription files. Also included is a transcript editor to work on transcripts after they are generated in-app. Designed for
@@ -219,6 +221,21 @@ the repetition penalty slightly, then re-transcribe.
 ```
 
 On macOS and Linux use `.venv/bin/python` instead.
+
+## Versioning
+
+Local Scribe uses its own simple `MAJOR.MINOR[.BUILD]` scheme, not semantic
+versioning tied to commit counts:
+
+- **1.00** — the original release.
+- **1.01** — added Apple Silicon GPU support via MLX, and the Mac/PC
+  hardware-acceleration architecture described above.
+- **1.01.1, 1.01.2, ...** — small fixes and tweaks on top of 1.01. A build
+  number appears only once there's something to append it to; a release
+  with no build suffix (like 1.01) is the first of that minor version.
+
+The running version is in `VERSION` at the repository root, and shown on
+the **About** page and in the app's window title/console banner.
 
 ## Licensing
 

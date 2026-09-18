@@ -28,6 +28,8 @@
   const timeReadout = document.getElementById('time-readout');
   const loopToggle = document.getElementById('loop-seg');
   const followToggle = document.getElementById('follow-play');
+  const playerCard = document.querySelector('.player-card');
+  const findbarEl = document.getElementById('findbar');
 
   let transcript = D.transcript;
   let roster = (D.speakers || []).slice();
@@ -307,8 +309,39 @@
       if (Number(segEl.dataset.id) === editingSegment) return;
       playFrom(Number(word.dataset.start));
       markPlayingWord(word);
+
+      // event.detail is the click count: 2 here means this is the second
+      // click of a double-click landing on the same word span (see the
+      // mousedown handler below for why that span is still there to land
+      // on). Cancel the single-click's pending edit-entry and let the
+      // upcoming native `dblclick` event open find & replace instead.
+      if (event.detail >= 2) {
+        cancelPendingWordEdit();
+        return;
+      }
+
+      // A single click both plays the word and is how a word gets edited
+      // (clicking anywhere in the segment normally focuses it natively) --
+      // but entering edit mode immediately would replace this word's span
+      // with plain text before a second click, if one is coming, could
+      // ever land on it. Defer it briefly so a genuine double-click still
+      // has something to double-click.
+      cancelPendingWordEdit();
+      pendingWordEdit = setTimeout(() => {
+        pendingWordEdit = null;
+        const textEl = word.closest('.seg-text');
+        if (textEl) textEl.focus();
+      }, 300);
     }
   });
+
+  let pendingWordEdit = null;
+  function cancelPendingWordEdit() {
+    if (pendingWordEdit) {
+      clearTimeout(pendingWordEdit);
+      pendingWordEdit = null;
+    }
+  }
 
   function markPlayingWord(word) {
     document.querySelectorAll('.w.playing').forEach((el) => el.classList.remove('playing'));
@@ -421,14 +454,17 @@
     hideWordCard();
   });
 
-  /* The first click of a double-click lands on `mousedown` before `dblclick`
-     ever fires, and on a contenteditable that click already focuses the
-     field and selects the word natively -- by the time `dblclick` runs, the
-     segment has already flipped into edit mode. `event.detail` carries the
-     click count on both `mousedown` and `click`, so the second `mousedown`
-     of the pair is where this has to be headed off. */
+  /* A plain click on a contenteditable focuses it as the browser's default
+     action, on mousedown, before any `click`/`dblclick` handler ever runs.
+     For a word span that means the *first* click of a double-click already
+     flips the segment into edit mode and replaces its word spans with plain
+     text (see the focusin handler above) - by the time `dblclick` fires,
+     there is no `.w` element left for it to land on. Preventing that
+     default here, and deferring the actual focus() call in the click
+     handler above instead of letting the browser do it immediately, keeps
+     the word span alive long enough for a genuine second click (and then
+     `dblclick`) to still find it. */
   host.addEventListener('mousedown', (event) => {
-    if (event.detail < 2) return;
     const wordEl = event.target.closest('.w');
     if (!wordEl) return;
     const segEl = wordEl.closest('.seg');
@@ -444,6 +480,7 @@
     const core = wordCore(wordEl.textContent);
     if (!core) return;
     event.preventDefault();
+    cancelPendingWordEdit();
     clearTimeout(wordHoverTimer);
     hoveredWordEl = null;
     hideWordCard();
@@ -778,6 +815,23 @@
     window.addEventListener('resize', LS.debounce(() => {
       drawRibbon(audio ? audio.currentTime : 0);
     }, 120));
+  }
+
+  /* Keeps the find bar (which is `position: sticky`, see app.css) pinned
+     just below the player card rather than under the very top of the
+     window, so it never sits on top of the audio controls. Measured from
+     offsetHeight (layout only) rather than getBoundingClientRect(), which
+     would give a different, scroll-position-dependent answer depending on
+     whether the player card happens to be pinned yet when this runs. */
+  function updateFindbarOffset() {
+    if (!playerCard || !findbarEl) return;
+    const topbar = document.querySelector('.topbar');
+    const topbarHeight = topbar ? topbar.offsetHeight : 58;
+    findbarEl.style.setProperty('--findbar-top', `${topbarHeight + playerCard.offsetHeight + 8}px`);
+  }
+  if (playerCard && findbarEl) {
+    updateFindbarOffset();
+    window.addEventListener('resize', LS.debounce(updateFindbarOffset, 150));
   }
 
   /* ------------------------------------------------------------- shortcuts */
