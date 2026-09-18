@@ -1,7 +1,23 @@
 # Local Scribe
 
-Offline transcription and transcript validation for research.
-Jeremy Riel, UIC TRAILblazer Lab.
+<p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
+
+An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org), Jeremy Riel.
+
+Given the capabilities of open-source language models, our lab presents a
+free, open-source automated transcription app that can transcribe audio and
+video file sound into workable transcription files. Designed for
+researchers, by researchers. This app is designed for protected
+human-subjects data by never allowing data to leave your local computer. No
+data is transferred at any time to a third party. All of the AI runs
+directly on your own computer. You can also edit and clean up transcript
+files directly in the app with the virtual editor, with several
+quality-of-life features like being able to quickly replay segments,
+visualizing words the AI system has low confidence in categorizing, and
+having timestamps clearly marked. It is intended to do the hard work of
+getting a first draft done and increasing the speed by which humans validate
+and de-identify transcripts for research. All data are protected as well,
+giving you assurance for your subjects' privacy.
 
 Local Scribe transcribes audio and video with OpenAI's Whisper models entirely
 on your own computer, then gives you a browser workbench for correcting the
