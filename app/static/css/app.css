@@ -195,6 +195,16 @@ body.console-open .page { padding-bottom: calc(var(--console-h) + 2rem); }
   padding: .8rem 1.5rem; font-size: 1.02rem; border-radius: 8px;
 }
 
+/* Deliberately loud: the console covers a big slice of the window while
+   open, and the button that gets it out of the way should be the easiest
+   thing on the bar to find, not another quiet grey button among several. */
+.console-close-btn {
+  background: var(--error); border-color: var(--error); color: #fff;
+  font-weight: 700; font-size: .95rem; padding: .5rem 1rem;
+}
+.console-close-btn:hover { background: #841a1a; border-color: #841a1a; }
+.console-close-btn span { font-size: .8em; }
+
 .btn-transcribe {
   background: var(--accent); border-color: var(--accent-dark); color: #fff;
   box-shadow: 0 2px 0 var(--accent-dark), var(--shadow);

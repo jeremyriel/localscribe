@@ -835,12 +835,25 @@
 
   /* -------------------------------------------------------- re-timestamp */
 
-  const retimestampBtn = document.getElementById('retimestamp');
-  if (retimestampBtn) {
-    retimestampBtn.addEventListener('click', async () => {
+  /* The same action is triggered from several places -- the sidebar's
+     primary button, and a smaller one inline in each yellow "this needs
+     re-timestamping" notice, so a validator does not have to go hunting for
+     the sidebar every time an edit makes them stale. All of them share the
+     js-retimestamp class and are kept in lockstep (busy state, label
+     restored to whatever each button originally said). */
+  const retimestampButtons = [...document.querySelectorAll('.js-retimestamp')];
+  if (retimestampButtons.length) {
+    const originalLabel = new Map(retimestampButtons.map((b) => [b, b.textContent]));
+    const setBusy = (busy) => {
+      retimestampButtons.forEach((b) => {
+        b.disabled = busy;
+        b.textContent = busy ? 'Re-timestamping...' : originalLabel.get(b);
+      });
+    };
+
+    const runRetimestamp = async () => {
       flush.flush();
-      retimestampBtn.disabled = true;
-      retimestampBtn.textContent = 'Re-timestamping...';
+      setBusy(true);
       if (window.LSConsole) LSConsole.open();
 
       try {
@@ -869,10 +882,11 @@
       } catch (err) {
         LS.toast(`Re-timestamp failed: ${err.message}`, 'error', 12000);
       } finally {
-        retimestampBtn.disabled = false;
-        retimestampBtn.textContent = 'Re-timestamp and rewrite captions';
+        setBusy(false);
       }
-    });
+    };
+
+    retimestampButtons.forEach((b) => b.addEventListener('click', runRetimestamp));
   }
 
   function refreshOutputs(outputs) {

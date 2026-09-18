@@ -157,6 +157,9 @@
         <span id="stale-text"></span>
         Press <strong>Re-timestamp</strong> to re-derive the word timings from
         your corrected text and rewrite the caption files.
+        <div class="row" style="margin-top:.5rem">
+          <button type="button" class="btn btn-small js-retimestamp">Re-timestamp</button>
+        </div>
       </div>
 
       <div class="legend" style="margin-bottom:.7rem">
@@ -190,7 +193,7 @@
         Corrections save automatically. When you have finished the human pass,
         re-derive the timings so the caption files match your text.
       </p>
-      <button type="button" class="btn btn-primary" id="retimestamp" style="width:100%">
+      <button type="button" class="btn btn-primary js-retimestamp" id="retimestamp" style="width:100%">
         Re-timestamp and rewrite captions
       </button>
       <p class="small muted" id="retimestamp-note" style="margin-top:.5rem">
@@ -221,6 +224,9 @@
         These files were exported before your latest edits and no longer
         match the transcript. Re-export or re-timestamp to bring them
         up to date.
+        <div class="row" style="margin-top:.5rem">
+          <button type="button" class="btn btn-small js-retimestamp">Re-timestamp</button>
+        </div>
       </div>
       <div class="row" style="margin-top:.7rem">
         <a class="btn btn-small"
