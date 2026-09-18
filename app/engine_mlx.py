@@ -26,7 +26,9 @@ accepted trade-offs, documented in savestate.md, not oversights.
 from __future__ import annotations
 
 import importlib.util
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # Audio window fed to mlx_whisper per call. Long enough to keep MLX's own
 # internal batching efficient, short enough that cancellation and the ETA
@@ -90,6 +92,40 @@ class MlxLoadError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+def _ensure_weight_filename(model_dir: str) -> None:
+    """Work around HF repos that don't use mlx_whisper's expected filename.
+
+    mlx_whisper's loader hardcodes the weight filename it looks for -
+    ``weights.safetensors``, falling back to ``weights.npz`` if that's
+    absent - but not every mlx-community repo actually ships a file with
+    either name (e.g. mlx-community/whisper-large-v3-turbo-4bit ships
+    ``model.safetensors`` instead). When neither expected name is present,
+    this creates ``weights.safetensors`` as an alias for whatever single
+    ``*.safetensors``/``*.npz`` file the snapshot does have, so the loader
+    finds it. Without this, loading such a model fails with a confusing
+    "[load_npz] Input must be a zip file..." error - mlx_whisper silently
+    falls through to a nonexistent weights.npz path.
+    """
+    path = Path(model_dir)
+    if (path / "weights.safetensors").exists() or (path / "weights.npz").exists():
+        return
+
+    candidates = sorted(path.glob("*.safetensors")) or sorted(path.glob("*.npz"))
+    if len(candidates) != 1:
+        return  # Ambiguous or nothing to alias - let the loader's own error surface.
+
+    actual = candidates[0]
+    alias = path / f"weights{actual.suffix}"
+    try:
+        os.symlink(actual.name, alias)
+    except OSError:
+        try:
+            import shutil
+            shutil.copyfile(actual, alias)
+        except OSError:
+            pass  # Best-effort; the loader's own error is still informative.
+
+
 def load_model(model_repo: str) -> None:
     """Force mlx-whisper to load and cache the model now.
 
@@ -101,6 +137,9 @@ def load_model(model_repo: str) -> None:
     through the public transcribe() API, which forces the same load+cache
     path without depending on any private function.
     """
+    if Path(model_repo).is_dir():
+        _ensure_weight_filename(model_repo)
+
     try:
         from mlx_whisper.load_models import load_model as _load
         _load(model_repo)

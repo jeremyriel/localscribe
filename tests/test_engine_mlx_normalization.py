@@ -12,6 +12,7 @@ Run with:  .venv/bin/python -m tests.test_engine_mlx_normalization
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -100,6 +101,51 @@ def test_segments_from_result_offsets_timestamps():
     check("word start shifted", seg.words[0].start == 121.0, str(seg.words[0].start))
     check("word end shifted", seg.words[1].end == 122.0, str(seg.words[1].end))
     check("word probability preserved", seg.words[0].probability == 0.95)
+
+
+# ---------------------------------------------------------------------------
+# engine_mlx: weight-filename alias (regression coverage for the real bug
+# this was written to fix: mlx-community/whisper-large-v3-turbo-4bit ships
+# its weights as "model.safetensors" instead of the "weights.safetensors"/
+# "weights.npz" names mlx_whisper's loader hardcodes, which made loading it
+# fail with a confusing "[load_npz] Input must be a zip file..." error -
+# mlx_whisper silently fell through to a nonexistent weights.npz path.
+# _ensure_weight_filename() must alias the one weight file present to a
+# name the loader will actually find.
+# ---------------------------------------------------------------------------
+
+def test_ensure_weight_filename_aliases_a_single_oddly_named_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "config.json").write_text("{}")
+        (Path(tmp) / "model.safetensors").write_bytes(b"fake weights")
+        M._ensure_weight_filename(tmp)
+        alias = Path(tmp) / "weights.safetensors"
+        check("alias created", alias.exists())
+        check(
+            "alias points at the real weight file",
+            alias.resolve().name == "model.safetensors",
+        )
+
+
+def test_ensure_weight_filename_is_a_noop_when_expected_name_present():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "weights.npz").write_bytes(b"fake weights")
+        M._ensure_weight_filename(tmp)
+        check(
+            "no alias created when weights.npz already exists",
+            not (Path(tmp) / "weights.safetensors").exists(),
+        )
+
+
+def test_ensure_weight_filename_is_a_noop_when_ambiguous():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "a.safetensors").write_bytes(b"one")
+        (Path(tmp) / "b.safetensors").write_bytes(b"two")
+        M._ensure_weight_filename(tmp)
+        check(
+            "no alias created when more than one candidate file exists",
+            not (Path(tmp) / "weights.safetensors").exists(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +353,9 @@ def main() -> int:
     tests = [
         test_translate_params_keeps_known_keys_drops_unknown,
         test_segments_from_result_offsets_timestamps,
+        test_ensure_weight_filename_aliases_a_single_oddly_named_file,
+        test_ensure_weight_filename_is_a_noop_when_expected_name_present,
+        test_ensure_weight_filename_is_a_noop_when_ambiguous,
         test_engine_segment_interoperates_with_transcript_schema,
         test_engine_segment_defaults_are_safe_for_transcript_schema,
         test_auto_prefers_cuda_over_mlx_when_both_usable,
