@@ -6,6 +6,18 @@
 
 <p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
 
+<p align="center">
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01-Windows-x86_64.exe"><strong>⬇ Download for Windows</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01-macOS-arm64.dmg"><strong>⬇ Download for macOS</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01-Linux-x86_64.AppImage"><strong>⬇ Download for Linux</strong></a>
+</p>
+<p align="center">
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest">All releases</a>
+  &middot; see <a href="#installable-desktop-apps">Installing</a> below for first-run permission steps
+</p>
+
 An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org); Jeremy Riel, PhD.
 
 **Current version: 1.01** — see [Versioning](#versioning) below.
@@ -61,12 +73,24 @@ copy is ever running.
 
 ### Installable desktop apps
 
-`packaging/` builds a proper installer for each platform - a `.dmg` on
-macOS, an `.exe` installer on Windows, an `.AppImage` on Linux - instead of
-cloning the repo and running a script. The installed app opens in its own
-window (not a browser tab), and stores your projects, models, and settings
-in your normal per-user data directory rather than inside the app itself,
-so they survive an update or reinstall.
+Pre-built installers - a `.dmg` for macOS, an `.exe` installer for Windows,
+an `.AppImage` for Linux - are published on the
+[**Releases page**](https://github.com/jeremyriel/localscribe/releases/latest)
+(links at the top of this README) so most people never need to touch a
+terminal or `git clone` anything. The installed app opens in its own window
+(not a browser tab), and stores your projects, models, and settings in your
+normal per-user data directory rather than inside the app itself, so they
+survive an update or reinstall.
+
+These installers are **not currently signed** - the same Gatekeeper/
+SmartScreen prompt described below still applies the first time you open
+one, since that requires an ongoing, paid, identity-verified code-signing
+setup (an Apple Developer ID + notarization on macOS, a Windows code-signing
+certificate or Microsoft Trusted Signing on Windows) that hasn't been set
+up yet. Linux needs no signing at all.
+
+Prefer to build one yourself instead of downloading a prebuilt binary?
+`packaging/` has the same scripts CI uses to produce each release asset:
 
 ```
 packaging/macos/build.sh              # -> dist/macos/*.dmg
@@ -74,14 +98,8 @@ packaging/windows/build.ps1           # -> dist/windows/*.exe (needs Inno Setup)
 packaging/linux/build-appimage.sh     # -> dist/linux/*.AppImage
 ```
 
-These installers are **not currently signed** - the same Gatekeeper/
-SmartScreen prompt described below still applies the first time you open
-one, since that requires an ongoing, paid, identity-verified code-signing
-setup (an Apple Developer ID + notarization on macOS, a Windows code-signing
-certificate or Microsoft Trusted Signing on Windows) that hasn't been set
-up yet. Linux needs no signing at all. `.github/workflows/build-installers.yml`
-builds and smoke-tests all three on every push, and attaches them to a
-GitHub Release when one is published.
+`.github/workflows/build-installers.yml` builds and smoke-tests all three
+on every push, and attaches them to a GitHub Release when one is published.
 
 ### Giving permissions for the launcher to run
 
