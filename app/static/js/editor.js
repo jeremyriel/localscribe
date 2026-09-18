@@ -24,6 +24,7 @@
   const saveState = document.getElementById('save-state');
   const staleWarning = document.getElementById('stale-warning');
   const staleText = document.getElementById('stale-text');
+  const outputsStale = document.getElementById('outputs-stale');
   const timeReadout = document.getElementById('time-readout');
   const loopToggle = document.getElementById('loop-seg');
   const followToggle = document.getElementById('follow-play');
@@ -62,6 +63,7 @@
     return w.map((word, index) =>
       `<span class="w${(word.prob !== undefined && word.prob < D.lowConfidence) ? ' low' : ''}"` +
       ` data-start="${word.start}" data-end="${word.end}" data-wi="${index}"` +
+      ` data-prob="${word.prob !== undefined ? word.prob : ''}"` +
       ` title="${word.prob !== undefined ? Math.round(word.prob * 100) + '% confidence' : ''} - click to hear">` +
       `${LS.escapeHtml(word.w)}</span>`
     ).join(' ');
@@ -199,13 +201,19 @@
 
   function updateStaleWarning() {
     const stale = transcript.segments.filter((s) => s.stale_timings).length;
-    if (!staleWarning) return;
-    staleWarning.hidden = stale === 0;
-    if (stale && staleText) {
-      staleText.textContent =
-        ` ${LS.plural(stale, 'segment has', 'segments have')} been edited, so the ` +
-        `word timings and caption files no longer match the text.`;
+    if (staleWarning) {
+      staleWarning.hidden = stale === 0;
+      if (stale && staleText) {
+        staleText.textContent =
+          ` ${LS.plural(stale, 'segment has', 'segments have')} been edited, so the ` +
+          `word timings and caption files no longer match the text.`;
+      }
     }
+    // The downloaded/exported files (outputs/) are only rewritten on an
+    // explicit Re-timestamp or Re-export, so a pending edit makes them
+    // stale too -- flag that where a validator would actually go looking
+    // for them, not only in the word-timing warning above.
+    if (outputsStale) outputsStale.hidden = stale === 0;
     document.querySelectorAll('.seg').forEach((el) => {
       const seg = segmentById(el.dataset.id);
       el.classList.toggle('stale', Boolean(seg && seg.stale_timings));
@@ -306,6 +314,130 @@
     document.querySelectorAll('.w.playing').forEach((el) => el.classList.remove('playing'));
     if (word) word.classList.add('playing');
   }
+
+  /* ------------------------------------------------------- word inspector */
+
+  /* Hovering a word for a couple of seconds surfaces a small card with its
+     model confidence and how many other times the same word appears in this
+     transcript -- context for deciding whether a find-and-replace across the
+     whole document is worth it. It floats to the right of the transcript,
+     fixed in place, and disappears the moment the pointer leaves the word,
+     rather than living in the side panel where its appearing and
+     disappearing would shove the other cards around on every hover. */
+
+  let wordCard = null;
+  let wordHoverTimer = null;
+  let hoveredWordEl = null;
+
+  function wordCore(text) {
+    return (text || '').replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '');
+  }
+
+  function countOccurrences(core) {
+    if (!core) return 0;
+    const needle = core.toLowerCase();
+    let count = 0;
+    transcript.segments.forEach((seg) => {
+      (seg.text || '').split(/\s+/).forEach((token) => {
+        if (wordCore(token).toLowerCase() === needle) count += 1;
+      });
+    });
+    return count;
+  }
+
+  function hideWordCard() {
+    if (wordCard) { wordCard.remove(); wordCard = null; }
+  }
+
+  function showWordCard(wordEl) {
+    const core = wordCore(wordEl.textContent);
+    if (!core) return;
+    const total = countOccurrences(core);
+    const prob = wordEl.dataset.prob;
+    const others = total - 1;
+
+    hideWordCard();
+    wordCard = document.createElement('div');
+    wordCard.className = 'word-card';
+    wordCard.innerHTML =
+      `<div class="word-card-word">${LS.escapeHtml(core)}</div>` +
+      (prob
+        ? `<div class="word-card-row">${Math.round(Number(prob) * 100)}% model confidence</div>`
+        : '') +
+      `<div class="word-card-row">${
+        others > 0
+          ? `<strong>${others}</strong> other ${others === 1 ? 'occurrence' : 'occurrences'} in this transcript`
+          : 'Appears only here in this transcript'
+      }</div>` +
+      `<div class="word-card-hint">Double-click the word to find &amp; replace it everywhere.</div>`;
+    document.body.appendChild(wordCard);
+
+    const rect = wordEl.getBoundingClientRect();
+    const top = Math.min(
+      Math.max(8, rect.top - 8),
+      window.innerHeight - wordCard.offsetHeight - 8
+    );
+    wordCard.style.top = `${top}px`;
+  }
+
+  host.addEventListener('mouseover', (event) => {
+    const wordEl = event.target.closest('.w');
+    if (!wordEl || wordEl === hoveredWordEl) return;
+    hoveredWordEl = wordEl;
+    clearTimeout(wordHoverTimer);
+    hideWordCard();
+    wordHoverTimer = setTimeout(() => {
+      if (hoveredWordEl === wordEl) showWordCard(wordEl);
+    }, 2000);
+  });
+
+  host.addEventListener('mouseout', (event) => {
+    const wordEl = event.target.closest('.w');
+    if (!wordEl || wordEl !== hoveredWordEl) return;
+    // Only clear once the pointer has actually left the word, not merely
+    // moved between nested elements inside it.
+    if (wordEl.contains(event.relatedTarget)) return;
+    clearTimeout(wordHoverTimer);
+    hoveredWordEl = null;
+    hideWordCard();
+  });
+
+  /* The first click of a double-click lands on `mousedown` before `dblclick`
+     ever fires, and on a contenteditable that click already focuses the
+     field and selects the word natively -- by the time `dblclick` runs, the
+     segment has already flipped into edit mode. `event.detail` carries the
+     click count on both `mousedown` and `click`, so the second `mousedown`
+     of the pair is where this has to be headed off. */
+  host.addEventListener('mousedown', (event) => {
+    if (event.detail < 2) return;
+    const wordEl = event.target.closest('.w');
+    if (!wordEl) return;
+    const segEl = wordEl.closest('.seg');
+    if (segEl && Number(segEl.dataset.id) === editingSegment) return;
+    event.preventDefault();
+  });
+
+  host.addEventListener('dblclick', (event) => {
+    const wordEl = event.target.closest('.w');
+    if (!wordEl) return;
+    const segEl = wordEl.closest('.seg');
+    if (segEl && Number(segEl.dataset.id) === editingSegment) return;
+    const core = wordCore(wordEl.textContent);
+    if (!core) return;
+    event.preventDefault();
+    clearTimeout(wordHoverTimer);
+    hoveredWordEl = null;
+    hideWordCard();
+    if (window.LSFindReplace) window.LSFindReplace.open(core);
+  });
+
+  // A full re-render replaces the DOM, so a card anchored to an element
+  // that no longer exists would be left stranded on screen.
+  document.addEventListener('ls:rendered', () => {
+    clearTimeout(wordHoverTimer);
+    hoveredWordEl = null;
+    hideWordCard();
+  });
 
   /* Editing: swap word spans for plain text on focus so the caret behaves,
      and restore the spans on blur. */
@@ -758,6 +890,9 @@
       try {
         const result = await LS.post(`${api}/export`);
         refreshOutputs(result.outputs);
+        // The files themselves are fresh again even though word timings may
+        // still be stale (that is a separate, still-true warning above).
+        if (outputsStale) outputsStale.hidden = true;
         LS.toast('Output files rewritten from the current transcript.', 'ok');
       } catch (err) {
         LS.toast(err.message, 'error');

@@ -548,6 +548,22 @@ canvas.ribbon {
 .proof-none { padding: .3rem .5rem; color: var(--ink-3); font-size: .82rem; }
 .proof-divider { height: 1px; background: var(--line-2); margin: .25rem 0; }
 
+/* Word inspector card, shown after hovering a word for a couple of seconds */
+.word-card {
+  position: fixed; z-index: 90; right: 16px; width: 230px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-s); box-shadow: var(--shadow-lift);
+  padding: .6rem .7rem; font-size: .82rem; pointer-events: none;
+}
+.word-card-word {
+  font-weight: 700; font-size: 1rem; margin-bottom: .3rem; word-break: break-word;
+}
+.word-card-row { color: var(--ink-2); margin-bottom: .2rem; }
+.word-card-hint {
+  color: var(--ink-3); font-size: .76rem; margin-top: .4rem;
+  padding-top: .35rem; border-top: 1px solid var(--line-2);
+}
+
 .legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .78rem; color: var(--ink-3); }
 .legend span { display: inline-flex; align-items: center; gap: .3rem; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }

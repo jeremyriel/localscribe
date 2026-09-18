@@ -6,9 +6,14 @@
    thing that makes this feel like a word processor rather than a linter.
 
    Checking happens on the server, where the dictionary already lives next to
-   the project glossary, so the browser never downloads a word list. Only
-   segments near the viewport are checked, which keeps a two-hour transcript
-   responsive. */
+   the project glossary, so the browser never downloads a word list.
+   Segments near the viewport are checked first, so squiggles appear
+   immediately on what the validator is looking at; a slower background
+   sweep then works through the rest of the document in small batches, so a
+   misspelling eventually gets flagged everywhere it occurs, not only where
+   the validator happened to scroll -- two identical typos looking
+   inconsistent (one flagged, one silently unchecked) is worse than either
+   flagged instantly or a little late. */
 
 (() => {
   const D = window.DOC;
@@ -156,9 +161,10 @@
 
   /* --------------------------------------------------------- lazy checking */
 
-  /* Only check what the validator can actually see. A two-hour interview can
-     run to thousands of segments, and checking them all up front would stall
-     the page for no benefit. */
+  /* What the validator can actually see is checked first, so squiggles show
+     up immediately on the part of the transcript in view. A two-hour
+     interview can run to thousands of segments, so checking everything in
+     one request up front would stall the page for no benefit either. */
   const observer = new IntersectionObserver((entries) => {
     const ids = entries
       .filter((entry) => entry.isIntersecting)
@@ -171,6 +177,36 @@
     observer.disconnect();
     document.querySelectorAll('.seg[data-id]').forEach((el) => observer.observe(el));
   }
+
+  /* Checking only what has scrolled into view means two identical
+     misspellings can end up looking inconsistent -- one flagged, the other
+     silently unchecked because the validator has not scrolled that far yet.
+     That is confusing on its own terms (why does this "EPSI" get a squiggle
+     and that one not?) regardless of how well the lazy check otherwise
+     works, so a low-priority sweep runs in the background to eventually
+     check every segment in the document, not only the ones scrolled past.
+     Small batches with a pause between them keep this from competing with
+     anything the validator is actively doing; checkSegments()'s own
+     `checked` cache means re-sweeping already-checked, unchanged segments
+     (the common case on every call after the first) costs nothing. */
+  let sweeping = false;
+  async function sweepAll() {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const ids = [...document.querySelectorAll('.seg[data-id]')]
+        .map((el) => Number(el.dataset.id));
+      const BATCH = 25;
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const batch = ids.slice(i, i + BATCH).filter((id) => !pending.has(id));
+        if (batch.length) await checkSegments(batch);
+        if (i + BATCH < ids.length) await new Promise((r) => setTimeout(r, 200));
+      }
+    } finally {
+      sweeping = false;
+    }
+  }
+  const debouncedSweep = LS.debounce(sweepAll, 600);
 
   /* ------------------------------------------------------------- suggestions */
 
@@ -367,8 +403,10 @@
     observeAll();
     paint();
     updateCount();
+    debouncedSweep();
   });
 
   observeAll();
   updateCount();
+  debouncedSweep();
 })();

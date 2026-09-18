@@ -262,8 +262,9 @@
 
   /* ---------------------------------------------------------------- wiring */
 
-  function open() {
+  function open(term) {
     bar.hidden = false;
+    if (typeof term === 'string' && term) input.value = term;
     input.focus();
     input.select();
     search();
@@ -321,4 +322,9 @@
     countEl.title = 'This browser cannot highlight matches in place; '
       + 'stepping through them still works.';
   }
+
+  // Lets other modules (double-clicking a word in editor.js) open the find
+  // bar pre-filled with a term, without reaching into this file's private
+  // state directly.
+  window.LSFindReplace = { open };
 })();

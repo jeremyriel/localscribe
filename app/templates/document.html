@@ -71,7 +71,9 @@
       </div>
       <p class="ribbon-hint">
         Click anywhere on the ribbon to play from that point. Click any word in
-        the transcript to hear it again.
+        the transcript to hear it again. Hold the pointer over a word to see
+        how many other times it appears. Double-click a word to find and
+        replace it everywhere.
         <kbd>Space</kbd> play/pause &middot;
         <kbd>&larr;</kbd><kbd>&rarr;</kbd> 2s &middot;
         <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> 5s &middot;
@@ -215,6 +217,11 @@
         </li>
         {% endfor %}
       </ul>
+      <div id="outputs-stale" class="notice notice-warn small" hidden style="margin-top:.6rem">
+        These files were exported before your latest edits and no longer
+        match the transcript. Re-export or re-timestamp to bring them
+        up to date.
+      </div>
       <div class="row" style="margin-top:.7rem">
         <a class="btn btn-small"
            href="/api/projects/{{ project.slug }}/documents/{{ document.id }}/download-all">
