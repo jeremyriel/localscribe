@@ -1,18 +1,19 @@
 # Local Scribe
 
-## Free and open-source automated audio transcription, captioning, and easy transcript editing software for researchers
+## Free and open-source AI-based automated audio transcription, captioning, and easy transcript editing software for researchers. Retain full data custody on your own computer: no transferring to any third parties for transcription.
 
 <p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
 
-An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org), Jeremy Riel.
+An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org); Jeremy Riel, PhD.
 
-Given the capabilities of open-source language models, our lab presents a
-free, open-source automated transcription app that can transcribe audio and
-video file sound into workable transcription files. Designed for
-researchers, by researchers. This app is designed for protected
-human-subjects data by never allowing data to leave your local computer. No
-data is transferred at any time to a third party. All of the AI runs
-directly on your own computer. You can also edit and clean up transcript
+Given the emerging capabilities of open-source language models, The UIC TRAILblazer Lab presents a
+free, open-source, and AI-based automated transcription app that can transcribe audio and
+video file sound into workable transcription files. Also included is a transcript editor to work on transcripts after they are generated in-app. Designed for
+researchers, by researchers, who are concerned about data security and protection of our research subjects' privacy in the age of AI. You don't need to send data to the cloud for transcription anymore. 
+
+Speed up transcript generation, keep your data fully secure and in your custody, and keep humans as the validators of data. 
+
+This app is designed for protected human-subjects data by never allowing data to leave your local computer. No data is transferred at any time to a third party. All of the AI runs directly on your own computer. You can also edit and clean up transcript
 files directly in the app with the virtual editor, with several
 quality-of-life features like being able to quickly replay segments,
 visualizing words the AI system has low confidence in categorizing, and
@@ -26,6 +27,8 @@ on your own computer, then gives you a browser workbench for correcting the
 transcript against the audio. Nothing is uploaded: no cloud service, no
 account, no telemetry, and no third-party assets in the interface.
 
+In this version, this app is for English-only texts. It may handle multilingual transcription and accents well via the Whisper AI models used, but additional language outputs are not yet available. Multiple-language testing has not yet been conducted.
+
 > **Disclaimer.** Local Scribe is provided **"AS IS", without warranty of any
 > kind**, express or implied. The authors and the UIC TRAILblazer Lab are
 > **not responsible or liable** for any data loss, data breach, or other harm
@@ -37,7 +40,7 @@ account, no telemetry, and no third-party assets in the interface.
 > applicable law, and for securing the computer it runs on. See
 > [LICENSE](LICENSE) for the full legal terms.
 
-## Start it
+## Starting the app
 
 | Platform | Command |
 |---|---|
@@ -52,7 +55,7 @@ seconds. A browser opens automatically at <http://127.0.0.1:43707>.
 Running the launcher again shuts down any existing instance first, so only one
 copy is ever running.
 
-### Allowing the launcher to run
+### Giving permissions for the launcher to run
 
 The first time you run one of these scripts, your operating system may block
 it as an unrecognised program, since it isn't signed by a registered
@@ -81,7 +84,7 @@ developer. This only needs to be done once per machine.
 - A network connection is needed **once**, to install packages and download a
   model. After that the app runs fully offline.
 
-### Windows, macOS and Linux: hardware acceleration
+### Windows, macOS and Linux hardware acceleration
 
 Local Scribe runs on Windows, macOS and Linux, and automatically uses
 whichever GPU acceleration your machine actually has — nothing to configure
@@ -108,7 +111,7 @@ Either way, AI Settings recommends a model and device for your specific
 hardware and explains its reasoning; you can always override it, including
 forcing CPU-only if you ever want to.
 
-## First use
+## First use: Things you want to do
 
 1. Open **AI Settings** and download a model. `large-v3-turbo` (1.6 GB) is the
    recommended default; the page recommends one based on your hardware and
@@ -145,7 +148,7 @@ Written into `projects/<project>/documents/<id>/outputs/`:
 | `transcript.srt` | SubRip captions |
 | `transcript.json` | Full word-level data for analysis |
 
-## Supported formats
+## Supported input formats
 
 **Audio** wav, mp3, m4a, aac, flac, ogg, opus, wma, aiff, amr, ac3, mka, caf, au
 **Video** mp4, mov, m4v, mkv, avi, webm, wmv, flv, mpg, mpeg, mts, m2ts, ts,
@@ -155,7 +158,7 @@ Audio is extracted from video automatically. Files are validated by inspecting
 their actual contents, not their extension, so a mislabelled file still works.
 Original files are never modified.
 
-## Where things live
+## Where things live on your computer
 
 ```
 projects/            your projects: media, transcripts, exports
@@ -172,14 +175,15 @@ single `.lsproj` archive; **Import project** reads one back.
 ## Options
 
 ```
+From a terminal (using the Windows .bat file for example):
 run.bat --no-browser        start without opening a browser
 run.bat --port 43711        use a different port
-run.bat --reinstall         force dependency reinstallation
+run.bat --reinstall         force dependency reinstallation, use if something doesn't seem to be installed right or isn't working correctly.
 ```
 
 The port can also be set with the `LOCALSCRIBE_PORT` environment variable.
 
-## Troubleshooting
+## Troubleshooting common errors
 
 **"Port 43707 is in use by ... which is not Local Scribe."**
 Something else holds the port. Local Scribe deliberately refuses to move to
@@ -202,7 +206,7 @@ Settings.
 Turn off "Condition on previous text" in AI Settings → Quality gates, or raise
 the repetition penalty slightly, then re-transcribe.
 
-## Tests
+## Tests you can run on the software
 
 ```
 .venv/Scripts/python.exe -m tests.test_realign      # re-timestamping
@@ -229,7 +233,7 @@ your own actions with it: how you configure it, what data you put into it,
 and how you secure the machine it runs on.
 
 If you use Local Scribe in published research, a citation of the software and
-the TRAILblazer Lab is appreciated but not required.
+the UIC TRAILblazer Lab is appreciated but not required.
 
 ### Components
 
