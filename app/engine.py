@@ -267,6 +267,56 @@ class WhisperEngine:
             int(SETTINGS.get("num_workers") or 1),
         )
 
+    def _reconcile_backend(
+        self, spec, model_key: str, device: str, index: int | None,
+    ) -> tuple[str, int | None]:
+        """Resolve a mismatch between the selected model and the resolved device.
+
+        The selected model's own file format determines which backend can
+        actually load it: an MLX model's weights (*.safetensors/*.npz)
+        cannot be read by CTranslate2's WhisperModel, and a CTranslate2
+        model's config.json cannot be read by mlx_whisper - it uses a
+        completely different schema (e.g. faster-whisper's config.json
+        carries an "alignment_heads" key that mlx_whisper's ModelDimensions
+        does not accept, so loading one through the wrong backend fails deep
+        inside the loader with a confusing error instead of a clear one).
+
+        `resolve_device()` only reflects hardware/settings, not which model
+        is currently selected, so the two can disagree - most commonly when
+        Device is 'auto' and the selected model predates MLX being
+        available on this machine. This reconciles that before either
+        loader runs, raising EngineError only when there is truly no way to
+        load the selected model at all.
+        """
+        if spec.engine == "mlx" and device != "mlx":
+            hw = self.hardware()
+            if hw.get("apple_silicon") and hw.get("mlx_available"):
+                CONSOLE.warn(
+                    f"{spec.label} only runs via the Apple GPU (MLX) "
+                    "backend; using it instead of the configured Device "
+                    "setting.",
+                    model=model_key, configured_device=device,
+                )
+                return "mlx", None
+            raise EngineError(
+                f"{spec.label} is an Apple GPU (MLX) model and needs "
+                "MLX, which is not available on this machine. Choose a "
+                "different model in AI Settings, or install mlx-whisper "
+                "(pip install -r requirements.txt) on Apple Silicon."
+            )
+
+        if spec.engine != "mlx" and device == "mlx":
+            fallback = "cuda" if self.hardware().get("cuda_usable") else "cpu"
+            CONSOLE.warn(
+                f"{spec.label} does not support the Apple GPU (MLX) "
+                f"backend; running on {fallback.upper()} instead. Choose a "
+                "model labelled '(Apple GPU)' in AI Settings to use MLX.",
+                model=model_key,
+            )
+            return fallback, None
+
+        return device, index
+
     def ensure_loaded(self, force: bool = False):
         """Load the configured model, reusing it when nothing relevant changed."""
         model_key = str(SETTINGS.get("model") or "").strip()
@@ -285,6 +335,7 @@ class WhisperEngine:
             )
 
         device, index = self.resolve_device()
+        device, index = self._reconcile_backend(spec, model_key, device, index)
         compute = self.resolve_compute_type(device)
         signature = self._build_signature(model_key, device, index, compute)
 

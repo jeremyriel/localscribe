@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import catalog
 from app import engine_mlx as M
-from app.engine import WhisperEngine
+from app.engine import EngineError, WhisperEngine
 from app.transcript import from_engine_segment
 
 FAILURES: list = []
@@ -199,6 +199,78 @@ def test_compute_type_for_mlx_is_fixed_sentinel():
 
 
 # ---------------------------------------------------------------------------
+# engine.py: model/backend mismatch reconciliation (regression coverage for
+# the real bug this was written to fix: a CTranslate2-only model like
+# "medium" selected while Device is "auto" and resolves to "mlx" on Apple
+# Silicon crashed deep inside mlx_whisper's model loader with a confusing
+# "ModelDimensions.__init__() got an unexpected keyword argument
+# 'alignment_heads'" error, because faster-whisper's config.json schema is
+# not mlx_whisper's. _reconcile_backend() must catch this before either
+# loader ever sees the mismatched model.
+# ---------------------------------------------------------------------------
+
+def test_reconcile_downgrades_ctranslate2_model_away_from_mlx_device():
+    eng = WhisperEngine()
+    eng._hardware = {"apple_silicon": True, "mlx_available": True, "cuda_usable": False}
+    eng.hardware = lambda refresh=False: eng._hardware
+    spec = catalog.model_spec("medium")
+    device, index = eng._reconcile_backend(spec, "medium", "mlx", None)
+    check(
+        "a CTranslate2 model forced off the mlx device falls back to cpu",
+        device == "cpu" and index is None, device,
+    )
+
+
+def test_reconcile_downgrades_to_cuda_when_usable():
+    eng = WhisperEngine()
+    eng._hardware = {"apple_silicon": True, "mlx_available": True, "cuda_usable": True}
+    eng.hardware = lambda refresh=False: eng._hardware
+    spec = catalog.model_spec("medium")
+    device, index = eng._reconcile_backend(spec, "medium", "mlx", None)
+    check(
+        "a CTranslate2 model forced off the mlx device prefers cuda if usable",
+        device == "cuda", device,
+    )
+
+
+def test_reconcile_forces_mlx_model_onto_mlx_device():
+    eng = WhisperEngine()
+    eng._hardware = {"apple_silicon": True, "mlx_available": True, "cuda_usable": False}
+    eng.hardware = lambda refresh=False: eng._hardware
+    spec = catalog.model_spec("tiny-mlx")
+    device, index = eng._reconcile_backend(spec, "tiny-mlx", "cpu", None)
+    check(
+        "an MLX-only model forces the device to mlx regardless of setting",
+        device == "mlx" and index is None, device,
+    )
+
+
+def test_reconcile_raises_when_mlx_model_selected_but_mlx_unavailable():
+    eng = WhisperEngine()
+    eng._hardware = {"apple_silicon": True, "mlx_available": False, "cuda_usable": False}
+    eng.hardware = lambda refresh=False: eng._hardware
+    spec = catalog.model_spec("tiny-mlx")
+    try:
+        eng._reconcile_backend(spec, "tiny-mlx", "cpu", None)
+        check("raises EngineError when MLX model selected but unavailable", False)
+    except EngineError:
+        check("raises EngineError when MLX model selected but unavailable", True)
+
+
+def test_reconcile_is_a_noop_when_model_and_device_already_agree():
+    eng = WhisperEngine()
+    eng._hardware = {"apple_silicon": True, "mlx_available": True, "cuda_usable": False}
+    eng.hardware = lambda refresh=False: eng._hardware
+    spec = catalog.model_spec("medium")
+    device, index = eng._reconcile_backend(spec, "medium", "cpu", None)
+    check("ctranslate2 model already on cpu is left alone", device == "cpu" and index is None)
+
+    spec_mlx = catalog.model_spec("tiny-mlx")
+    device, index = eng._reconcile_backend(spec_mlx, "tiny-mlx", "mlx", None)
+    check("mlx model already on mlx is left alone", device == "mlx" and index is None)
+
+
+# ---------------------------------------------------------------------------
 # catalog.py: recommendation on fabricated Apple Silicon hardware
 # ---------------------------------------------------------------------------
 
@@ -243,6 +315,11 @@ def main() -> int:
         test_explicit_mlx_falls_back_to_cpu_when_unavailable,
         test_explicit_mlx_honoured_when_available,
         test_compute_type_for_mlx_is_fixed_sentinel,
+        test_reconcile_downgrades_ctranslate2_model_away_from_mlx_device,
+        test_reconcile_downgrades_to_cuda_when_usable,
+        test_reconcile_forces_mlx_model_onto_mlx_device,
+        test_reconcile_raises_when_mlx_model_selected_but_mlx_unavailable,
+        test_reconcile_is_a_noop_when_model_and_device_already_agree,
         test_recommend_large_memory_mac,
         test_recommend_mid_memory_mac,
         test_recommend_low_memory_mac,
