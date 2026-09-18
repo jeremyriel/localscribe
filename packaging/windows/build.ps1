@@ -35,9 +35,15 @@ foreach ($item in @("app", "bootstrap.py", "requirements.txt", "VERSION", "LICEN
 }
 
 Write-Host "==> Fetching a self-contained Python interpreter (Windows x86_64)"
+# Authenticated when a token is available (CI sets GITHUB_TOKEN): GitHub
+# Actions runners share a pool of outbound IPs that can exhaust the
+# unauthenticated API rate limit fast; unset locally, this is simply an
+# empty (no-op) header set.
+$GhHeaders = @{}
+if ($env:GITHUB_TOKEN) { $GhHeaders["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
 $Release = Invoke-RestMethod `
     -Uri "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest" `
-    -TimeoutSec 20
+    -Headers $GhHeaders -TimeoutSec 20
 
 $Asset = $null
 foreach ($PyVer in @("3.13", "3.12", "3.11")) {

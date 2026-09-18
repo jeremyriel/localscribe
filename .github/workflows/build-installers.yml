@@ -23,6 +23,20 @@ on:
   release:
     types: [published]
 
+# Needed for softprops/action-gh-release to attach assets to the release -
+# the default GITHUB_TOKEN is read-only otherwise on repos with tightened
+# default permissions.
+permissions:
+  contents: write
+
+# The packaging scripts query the GitHub API for the latest
+# python-build-standalone release. GitHub Actions runners share a pool of
+# outbound IPs that exhausts the unauthenticated API rate limit fast -
+# authenticating with GITHUB_TOKEN raises it enough that this never matters
+# in practice. Has no effect on a local run, where these are simply unset.
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
   macos:
     runs-on: macos-latest

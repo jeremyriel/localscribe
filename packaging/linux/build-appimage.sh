@@ -48,9 +48,19 @@ echo "==> Fetching a self-contained Python interpreter ($TRIPLE)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-curl -fsSL --max-time 20 \
-  https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
-  -o "$TMP/release.json"
+# Authenticated when a token is available (CI sets GITHUB_TOKEN): GitHub
+# Actions runners share a pool of outbound IPs that can exhaust the
+# unauthenticated API rate limit fast; unset locally, this is simply a
+# no-op extra header.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  curl -fsSL --max-time 20 -H "Authorization: Bearer $GITHUB_TOKEN" \
+    https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
+    -o "$TMP/release.json"
+else
+  curl -fsSL --max-time 20 \
+    https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
+    -o "$TMP/release.json"
+fi
 
 PY_URL=""
 for PYVER in 3.13 3.12 3.11; do
