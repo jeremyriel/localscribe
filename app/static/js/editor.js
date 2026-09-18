@@ -356,14 +356,22 @@
     const prob = wordEl.dataset.prob;
     const others = total - 1;
 
+    // realign.py stamps prob=0.0 on any word it redistributes after a text
+    // edit (_spread(..., prob=0.0)) precisely because there is no real model
+    // confidence for text a human typed - it is not a genuine low score, so
+    // showing it as "0% model confidence" would read backwards.
+    const isUserEdited = prob !== '' && prob !== undefined && Number(prob) === 0;
+
     hideWordCard();
     wordCard = document.createElement('div');
     wordCard.className = 'word-card';
     wordCard.innerHTML =
       `<div class="word-card-word">${LS.escapeHtml(core)}</div>` +
-      (prob
-        ? `<div class="word-card-row">${Math.round(Number(prob) * 100)}% model confidence</div>`
-        : '') +
+      (isUserEdited
+        ? `<div class="word-card-row">User-edited</div>`
+        : prob
+          ? `<div class="word-card-row">${Math.round(Number(prob) * 100)}% model confidence</div>`
+          : '') +
       `<div class="word-card-row">${
         others > 0
           ? `<strong>${others}</strong> other ${others === 1 ? 'occurrence' : 'occurrences'} in this transcript`
@@ -372,9 +380,20 @@
       `<div class="word-card-hint">Double-click the word to find &amp; replace it everywhere.</div>`;
     document.body.appendChild(wordCard);
 
-    const rect = wordEl.getBoundingClientRect();
+    // Anchored just to the right of the transcript column, not the far
+    // viewport edge, so it stays close to what is being read; clamped so it
+    // never overlaps the word itself or runs off the browser window.
+    const editorCard = wordEl.closest('.card');
+    const editorRect = (editorCard || host).getBoundingClientRect();
+    const wordRect = wordEl.getBoundingClientRect();
+    const left = Math.min(
+      editorRect.right + 12,
+      window.innerWidth - wordCard.offsetWidth - 8
+    );
+    wordCard.style.left = `${Math.max(8, left)}px`;
+
     const top = Math.min(
-      Math.max(8, rect.top - 8),
+      Math.max(8, wordRect.top - 8),
       window.innerHeight - wordCard.offsetHeight - 8
     );
     wordCard.style.top = `${top}px`;
@@ -388,7 +407,7 @@
     hideWordCard();
     wordHoverTimer = setTimeout(() => {
       if (hoveredWordEl === wordEl) showWordCard(wordEl);
-    }, 2000);
+    }, 1000);
   });
 
   host.addEventListener('mouseout', (event) => {

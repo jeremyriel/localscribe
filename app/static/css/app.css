@@ -550,7 +550,9 @@ canvas.ribbon {
 
 /* Word inspector card, shown after hovering a word for a couple of seconds */
 .word-card {
-  position: fixed; z-index: 90; right: 16px; width: 230px;
+  /* left/top are set in JS, anchored to the transcript column rather than
+     a fixed viewport edge -- see showWordCard() in editor.js. */
+  position: fixed; z-index: 90; width: 230px;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius-s); box-shadow: var(--shadow-lift);
   padding: .6rem .7rem; font-size: .82rem; pointer-events: none;
