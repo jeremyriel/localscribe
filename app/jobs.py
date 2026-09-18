@@ -552,7 +552,10 @@ class JobQueue:
                 repo_id=spec.repo,
                 cache_dir=str(target),
                 allow_patterns=[
+                    # CTranslate2 weights, tokenizer/config files.
                     "*.bin", "*.json", "*.txt", "*.model", "preprocessor_config.json",
+                    # MLX weights (mlx-community repos ship one or the other).
+                    "*.safetensors", "*.npz",
                 ],
             )
         finally:

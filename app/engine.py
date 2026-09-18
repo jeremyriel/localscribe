@@ -142,6 +142,7 @@ class WhisperEngine:
         self._loaded_model = ""
         self._loaded_device = ""
         self._loaded_compute = ""
+        self._backend = "ctranslate2"   # ctranslate2 | mlx
         self._load_seconds = 0.0
 
     # -- hardware ----------------------------------------------------------
@@ -167,12 +168,35 @@ class WhisperEngine:
                     index = None
             return "cuda", index
 
+        if wanted == "mlx":
+            if hw.get("apple_silicon") and hw.get("mlx_available"):
+                return "mlx", None
+            CONSOLE.warn(
+                "Device is set to 'mlx' but the MLX runtime is not available "
+                "on this machine; falling back to CPU. Install mlx-whisper "
+                "(it ships in requirements.txt on Apple Silicon) or set "
+                "Device to 'auto'.",
+            )
+            return "cpu", None
+
         if wanted == "cpu":
             return "cpu", None
 
-        return ("cuda", None) if hw.get("cuda_usable") else ("cpu", None)
+        # auto: prefer a GPU path when one is actually usable, in order of
+        # how much faster it is over CPU; otherwise CPU.
+        if hw.get("cuda_usable"):
+            return "cuda", None
+        if hw.get("apple_silicon") and hw.get("mlx_available"):
+            return "mlx", None
+        return "cpu", None
 
     def resolve_compute_type(self, device: str) -> str:
+        if device == "mlx":
+            # Quantization on MLX is baked into which model repo is chosen
+            # (see catalog.py), not a runtime precision flag - this is a
+            # fixed, informational value for logging/telemetry only.
+            return "mlx-native"
+
         wanted = str(SETTINGS.get("compute_type", "auto") or "auto").strip()
         hw = self.hardware()
 
@@ -225,6 +249,10 @@ class WhisperEngine:
             "gpu_name": (hw.get("gpus") or [""])[0],
             "driver_version": hw.get("driver_version"),
             "cpu_cores": hw.get("cpu_cores"),
+            "backend": self._backend,
+            "apple_silicon": bool(hw.get("apple_silicon")),
+            "mlx_available": bool(hw.get("mlx_available")),
+            "unified_memory_gb": hw.get("unified_memory_gb"),
             "warnings": hw.get("warnings") or [],
             "notes": hw.get("notes") or [],
             "offline_lock": bool(SETTINGS.get("offline_lock")),
@@ -241,8 +269,6 @@ class WhisperEngine:
 
     def ensure_loaded(self, force: bool = False):
         """Load the configured model, reusing it when nothing relevant changed."""
-        from faster_whisper import WhisperModel
-
         model_key = str(SETTINGS.get("model") or "").strip()
         spec = catalog.model_spec(model_key)
         if spec is None:
@@ -284,26 +310,43 @@ class WhisperEngine:
             )
 
             started = time.monotonic()
-            kwargs = {
-                "device": device,
-                "compute_type": compute,
-                "num_workers": max(1, int(SETTINGS.get("num_workers") or 1)),
-                "local_files_only": True,
-            }
-            if device == "cpu":
-                threads = int(SETTINGS.get("cpu_threads") or 0)
-                if threads > 0:
-                    kwargs["cpu_threads"] = threads
-            if index is not None:
-                kwargs["device_index"] = index
 
-            try:
-                model = WhisperModel(str(snapshot), **kwargs)
-            except Exception as exc:
-                self._state = "error"
-                self._detail = str(exc)
-                CONSOLE.error(f"Model failed to load: {exc}", model=model_key)
-                raise EngineError(self._explain_load_failure(exc, device, compute)) from exc
+            if device == "mlx":
+                from . import engine_mlx
+                try:
+                    engine_mlx.load_model(str(snapshot))
+                except engine_mlx.MlxLoadError as exc:
+                    self._state = "error"
+                    self._detail = str(exc)
+                    CONSOLE.error(f"Model failed to load: {exc}", model=model_key)
+                    raise EngineError(self._explain_load_failure(exc, device, compute)) from exc
+                # MLX has no persistent "model" handle worth keeping - it
+                # caches by repo/path internally. The resolved snapshot path
+                # doubles as the cache key transcribe() passes back in.
+                model = snapshot
+            else:
+                from faster_whisper import WhisperModel
+
+                kwargs = {
+                    "device": device,
+                    "compute_type": compute,
+                    "num_workers": max(1, int(SETTINGS.get("num_workers") or 1)),
+                    "local_files_only": True,
+                }
+                if device == "cpu":
+                    threads = int(SETTINGS.get("cpu_threads") or 0)
+                    if threads > 0:
+                        kwargs["cpu_threads"] = threads
+                if index is not None:
+                    kwargs["device_index"] = index
+
+                try:
+                    model = WhisperModel(str(snapshot), **kwargs)
+                except Exception as exc:
+                    self._state = "error"
+                    self._detail = str(exc)
+                    CONSOLE.error(f"Model failed to load: {exc}", model=model_key)
+                    raise EngineError(self._explain_load_failure(exc, device, compute)) from exc
 
             self._load_seconds = time.monotonic() - started
             self._model = model
@@ -312,6 +355,7 @@ class WhisperEngine:
             self._loaded_model = model_key
             self._loaded_device = device + (f":{index}" if index is not None else "")
             self._loaded_compute = compute
+            self._backend = "mlx" if device == "mlx" else "ctranslate2"
             self._detail = (
                 f"{spec.label} ready on {self._loaded_device.upper()} ({compute})"
             )
@@ -325,6 +369,14 @@ class WhisperEngine:
     def _explain_load_failure(self, exc: Exception, device: str, compute: str) -> str:
         text = str(exc)
         lowered = text.lower()
+        if device == "mlx":
+            return (
+                "The model could not load via MLX (Apple GPU). Set Device to "
+                "'cpu' in AI Settings to continue without the GPU, or check "
+                "that mlx-whisper installed correctly "
+                "(pip install -r requirements.txt). "
+                f"Original error: {text}"
+            )
         if device == "cuda" and ("cudnn" in lowered or "cublas" in lowered):
             return (
                 "The model could not load on the GPU because a CUDA support "
@@ -456,7 +508,13 @@ class WhisperEngine:
         tracker = RateTracker(total_audio=float(duration))
         started = time.monotonic()
 
-        segments_iter, info = model.transcribe(audio, **params)
+        if self._backend == "mlx":
+            from . import engine_mlx
+            segments_iter, info = engine_mlx.transcribe(
+                audio, model_repo=str(model), params=params, should_cancel=should_cancel,
+            )
+        else:
+            segments_iter, info = model.transcribe(audio, **params)
 
         detected = getattr(info, "language", "") or ""
         probability = float(getattr(info, "language_probability", 0.0) or 0.0)

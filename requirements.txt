@@ -10,6 +10,13 @@ python-multipart>=0.0.9
 # Pulls ctranslate2, av (bundled ffmpeg libs), tokenizers, huggingface-hub, onnxruntime.
 faster-whisper>=1.1.0,<2.0
 
+# ASR runtime, Apple Silicon GPU: MLX execution of Whisper weights on the
+# Mac's own GPU through unified memory. Small, pure-native wheels published
+# only for macOS arm64 - the marker makes pip silently skip them everywhere
+# else, so unlike requirements-gpu.txt this needs no separate opt-in install.
+mlx>=0.18.0 ; sys_platform == "darwin" and platform_machine == "arm64"
+mlx-whisper>=0.4.0 ; sys_platform == "darwin" and platform_machine == "arm64"
+
 # Exports
 python-docx>=1.1.0,<2.0
 

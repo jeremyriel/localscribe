@@ -32,6 +32,12 @@
         {% endif %}
         <dt>GPU usable</dt>
         <dd>{% if catalog.hardware.cuda_usable %}yes{% else %}no - transcription runs on CPU{% endif %}</dd>
+        {% if catalog.hardware.apple_silicon %}
+        <dt>Unified memory</dt>
+        <dd>{% if catalog.hardware.unified_memory_gb %}{{ catalog.hardware.unified_memory_gb }} GB, shared by CPU and GPU{% else %}unknown{% endif %}</dd>
+        <dt>Apple GPU (MLX) usable</dt>
+        <dd>{% if catalog.hardware.mlx_available %}yes{% else %}no - mlx-whisper is not installed{% endif %}</dd>
+        {% endif %}
       </dl>
     </div>
     <div>
@@ -197,6 +203,13 @@
           <select id="f-{{ field.key }}" name="{{ field.key }}" data-kind="select">
             <option value="auto" {% if values[field.key] == 'auto' %}selected{% endif %}>auto</option>
             <option value="cpu" {% if values[field.key] == 'cpu' %}selected{% endif %}>cpu</option>
+            {% if catalog.hardware.apple_silicon %}
+              <option value="mlx"
+                {% if values[field.key] == 'mlx' %}selected{% endif %}
+                {% if not catalog.hardware.mlx_available %}disabled{% endif %}>
+                mlx - Apple GPU{% if not catalog.hardware.mlx_available %} (mlx-whisper not installed){% endif %}
+              </option>
+            {% endif %}
             {% for index in range(catalog.hardware.gpus|length) %}
               <option value="cuda:{{ index }}"
                 {% if values[field.key] == 'cuda:' ~ index %}selected{% endif %}

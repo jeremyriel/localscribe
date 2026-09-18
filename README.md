@@ -8,6 +8,17 @@ on your own computer, then gives you a browser workbench for correcting the
 transcript against the audio. Nothing is uploaded: no cloud service, no
 account, no telemetry, and no third-party assets in the interface.
 
+> **Disclaimer.** Local Scribe is provided **"AS IS", without warranty of any
+> kind**, express or implied. The authors and the UIC TRAILblazer Lab are
+> **not responsible or liable** for any data loss, data breach, or other harm
+> arising from installing, configuring, or using this software, including but
+> not limited to mishandling of recordings, transcripts, or other data by the
+> user, the operating environment, or third-party components it depends on.
+> **You are solely responsible for how you use this application** — including
+> compliance with your IRB protocol, institutional data-security policy, and
+> applicable law, and for securing the computer it runs on. See
+> [LICENSE](LICENSE) for the full legal terms.
+
 ## Start it
 
 | Platform | Command |
@@ -143,7 +154,14 @@ On macOS and Linux use `.venv/bin/python` instead.
 Local Scribe is released under the **MIT licence**, copyright © 2026 Jeremy
 Riel, UIC TRAILblazer Lab. See [LICENSE](LICENSE). You may use, modify and
 redistribute it freely, including commercially, provided the copyright notice
-and licence text are retained; it comes with no warranty.
+and licence text are retained.
+
+The software is provided **"AS IS", without warranty of any kind**. The
+authors and copyright holders are not liable for any claim, damages, or other
+liability — including data loss or a data-security breach — arising from the
+software or its use. By using Local Scribe you accept full responsibility for
+your own actions with it: how you configure it, what data you put into it,
+and how you secure the machine it runs on.
 
 If you use Local Scribe in published research, a citation of the software and
 the TRAILblazer Lab is appreciated but not required.

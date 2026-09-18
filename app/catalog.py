@@ -9,8 +9,11 @@ recommendation without a reason is just a default.
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import platform
 import shutil
+import subprocess
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -33,6 +36,7 @@ class ModelSpec:
     languages: str        # "multilingual" or "English only"
     suitability: str      # what it is good for, and what it is not
     tier: str             # draft | working | research
+    engine: str = "ctranslate2"   # ctranslate2 | mlx
 
 
 CATALOG: tuple[ModelSpec, ...] = (
@@ -158,6 +162,137 @@ CATALOG: tuple[ModelSpec, ...] = (
         ),
         tier="research",
     ),
+
+    # -- Apple Silicon (MLX / Metal) ---------------------------------------
+    # These run on the GPU through MLX, Apple's unified-memory framework,
+    # instead of CTranslate2 on CPU. Repo names and download sizes were
+    # confirmed against the live mlx-community listing and its file sizes on
+    # Hugging Face while this catalogue was written; that organisation's
+    # listing moves independently of this one, so re-check before assuming
+    # a newer quantization isn't already available - see savestate.md.
+    ModelSpec(
+        key="tiny-mlx", repo="mlx-community/whisper-tiny-mlx", engine="mlx",
+        label="Tiny (Apple GPU)", params="39M", download_mb=74, vram_gb=0.0,
+        speed="fastest, runs on the GPU via MLX", languages="multilingual",
+        suitability=(
+            "Smoke-testing the pipeline on Apple Silicon. Same accuracy "
+            "ceiling as the CPU Tiny model - not for research transcripts."
+        ),
+        tier="draft",
+    ),
+    ModelSpec(
+        key="tiny.en-mlx", repo="mlx-community/whisper-tiny.en-mlx", engine="mlx",
+        label="Tiny English (Apple GPU)", params="39M", download_mb=74, vram_gb=0.0,
+        speed="fastest, runs on the GPU via MLX", languages="English only",
+        suitability="As Tiny (Apple GPU), slightly better on English. Draft quality only.",
+        tier="draft",
+    ),
+    ModelSpec(
+        key="base-mlx", repo="mlx-community/whisper-base-mlx", engine="mlx",
+        label="Base (Apple GPU)", params="74M", download_mb=144, vram_gb=0.0,
+        speed="very fast, runs on the GPU via MLX", languages="multilingual",
+        suitability=(
+            "Quick rough drafts on the GPU. Noticeably error-prone on proper "
+            "nouns, overlapping speech and accents."
+        ),
+        tier="draft",
+    ),
+    ModelSpec(
+        key="base.en-mlx", repo="mlx-community/whisper-base.en-mlx", engine="mlx",
+        label="Base English (Apple GPU)", params="74M", download_mb=144, vram_gb=0.0,
+        speed="very fast, runs on the GPU via MLX", languages="English only",
+        suitability="As Base (Apple GPU), better on English. Draft quality.",
+        tier="draft",
+    ),
+    ModelSpec(
+        key="small-mlx", repo="mlx-community/whisper-small-mlx", engine="mlx",
+        label="Small (Apple GPU)", params="244M", download_mb=481, vram_gb=0.0,
+        speed="fast, runs on the GPU via MLX", languages="multilingual",
+        suitability=(
+            "A reasonable floor for clean audio, running on the GPU instead "
+            "of CPU. Expect to correct names and technical terms by hand."
+        ),
+        tier="working",
+    ),
+    ModelSpec(
+        key="small.en-mlx", repo="mlx-community/whisper-small.en-mlx", engine="mlx",
+        label="Small English (Apple GPU)", params="244M", download_mb=481, vram_gb=0.0,
+        speed="fast, runs on the GPU via MLX", languages="English only",
+        suitability="As Small (Apple GPU), better on English-only material.",
+        tier="working",
+    ),
+    ModelSpec(
+        key="medium-mlx", repo="mlx-community/whisper-medium-mlx", engine="mlx",
+        label="Medium (Apple GPU, fp16)", params="769M", download_mb=1525, vram_gb=0.0,
+        speed="moderate, runs on the GPU via MLX", languages="multilingual",
+        suitability=(
+            "Good accuracy at full precision. A sound default for interview "
+            "audio when there is unified memory to spare."
+        ),
+        tier="research",
+    ),
+    ModelSpec(
+        key="medium-mlx-4bit", repo="mlx-community/whisper-medium-mlx-4bit", engine="mlx",
+        label="Medium (Apple GPU, 4-bit)", params="769M", download_mb=512, vram_gb=0.0,
+        speed="fast, runs on the GPU via MLX, smaller memory footprint",
+        languages="multilingual",
+        suitability=(
+            "Medium's accuracy in a third of the memory and disk cost, for "
+            "Macs with less unified memory to spare."
+        ),
+        tier="research",
+    ),
+    ModelSpec(
+        key="medium.en-mlx", repo="mlx-community/whisper-medium.en-mlx", engine="mlx",
+        label="Medium English (Apple GPU, fp16)", params="769M", download_mb=1525, vram_gb=0.0,
+        speed="moderate, runs on the GPU via MLX", languages="English only",
+        suitability="As Medium (Apple GPU), better on English-only material.",
+        tier="research",
+    ),
+    ModelSpec(
+        key="large-v3-turbo-mlx", repo="mlx-community/whisper-large-v3-turbo", engine="mlx",
+        label="Large v3 Turbo (Apple GPU, fp16)", params="809M", download_mb=1614, vram_gb=0.0,
+        speed="fast on the GPU via MLX (~4x Large v3)", languages="multilingual",
+        suitability=(
+            "The best general default on Apple Silicon: close to Large v3 "
+            "accuracy, multilingual, and several times faster, running on "
+            "the GPU through unified memory."
+        ),
+        tier="research",
+    ),
+    ModelSpec(
+        key="large-v3-turbo-mlx-4bit", repo="mlx-community/whisper-large-v3-turbo-4bit", engine="mlx",
+        label="Large v3 Turbo (Apple GPU, 4-bit)", params="809M", download_mb=464, vram_gb=0.0,
+        speed="fast on the GPU via MLX, smaller memory footprint",
+        languages="multilingual",
+        suitability=(
+            "Turbo's speed and near-Large-v3 accuracy at a third of the "
+            "memory and disk cost - a good default on Macs with 16-24GB of "
+            "unified memory."
+        ),
+        tier="research",
+    ),
+    ModelSpec(
+        key="large-v3-mlx", repo="mlx-community/whisper-large-v3-mlx", engine="mlx",
+        label="Large v3 (Apple GPU, fp16)", params="1550M", download_mb=3084, vram_gb=0.0,
+        speed="fast on the GPU via MLX (Apple Silicon only)", languages="multilingual",
+        suitability=(
+            "Highest accuracy, running on the GPU through unified memory "
+            "instead of CPU. The best choice on a Mac with 32GB+ of memory."
+        ),
+        tier="research",
+    ),
+    ModelSpec(
+        key="large-v3-mlx-4bit", repo="mlx-community/whisper-large-v3-mlx-4bit", engine="mlx",
+        label="Large v3 (Apple GPU, 4-bit)", params="1550M", download_mb=1947, vram_gb=0.0,
+        speed="fast on the GPU via MLX, smaller memory footprint", languages="multilingual",
+        suitability=(
+            "Large v3 accuracy at roughly two thirds of the memory and disk "
+            "cost of the full-precision version, for Macs with less unified "
+            "memory to spare."
+        ),
+        tier="research",
+    ),
 )
 
 CATALOG_BY_KEY = {m.key: m for m in CATALOG}
@@ -191,8 +326,11 @@ def local_model_path(key: str) -> Path | None:
     base = model_cache_dir() / _repo_cache_name(spec.repo) / "snapshots"
     if not base.is_dir():
         return None
+    # CTranslate2 models are a single model.bin; MLX models are
+    # *.safetensors/*.npz weights next to a config.json, no fixed filename.
+    marker = "config.json" if spec.engine == "mlx" else "model.bin"
     for snapshot in sorted(base.iterdir(), reverse=True):
-        if (snapshot / "model.bin").exists():
+        if (snapshot / marker).exists():
             return snapshot
     return None
 
@@ -271,9 +409,16 @@ def probe_hardware() -> dict:
         "cuda_compute_types": [],
         "gpus": [],
         "driver_version": None,
+        "apple_silicon": platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64"),
+        "mlx_available": False,
+        "unified_memory_gb": None,
         "notes": [],
         "warnings": [],
     }
+
+    if info["apple_silicon"]:
+        info["mlx_available"] = _mlx_available()
+        info["unified_memory_gb"] = _apple_unified_memory_gb()
 
     try:
         info["cpu_compute_types"] = sorted(
@@ -331,6 +476,24 @@ def probe_hardware() -> dict:
                 "slower than int8_float32 on this card. Leave compute type on "
                 "'auto' unless you have a reason not to."
             )
+    elif info["apple_silicon"]:
+        if info["mlx_available"]:
+            mem = info["unified_memory_gb"]
+            info["notes"].append(
+                (f"Apple Silicon detected with {mem} GB of unified memory, "
+                 if mem else "Apple Silicon detected. Unified memory ")
+                + "shared by the CPU and GPU with no separate VRAM ceiling to "
+                "plan around. Transcription can run on the GPU via MLX - pick "
+                "one of the '(Apple GPU)' models below, or leave Device on "
+                "'auto'."
+            )
+        else:
+            info["notes"].append(
+                "Apple Silicon detected, but mlx-whisper is not installed, so "
+                "transcription runs on CPU. Running "
+                "'pip install -r requirements.txt' in the app's virtual "
+                "environment should add GPU support."
+            )
     else:
         info["notes"].append(
             f"Running on CPU with {info['cpu_cores']} logical cores. Expect "
@@ -339,6 +502,36 @@ def probe_hardware() -> dict:
         )
 
     return info
+
+
+def _mlx_available() -> bool:
+    """Cheap check for whether mlx-whisper is installed, without importing it."""
+    return (
+        importlib.util.find_spec("mlx") is not None
+        and importlib.util.find_spec("mlx_whisper") is not None
+    )
+
+
+def _apple_unified_memory_gb() -> float | None:
+    """Total system memory on Apple Silicon.
+
+    This doubles as the GPU's memory ceiling, since there is no separate
+    VRAM to query - unlike the NVIDIA case above, this is simple and
+    reliable, so it is safe to state as a number rather than hedge it.
+    """
+    try:
+        out = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        return round(int(out.stdout.strip()) / 1e9, 1)
+    except ValueError:
+        return None
 
 
 def _driver_too_old(driver: str | None, minimum: float = 527.0) -> bool:
@@ -412,6 +605,56 @@ def recommend(hardware: dict | None = None) -> dict:
     """Recommend a model and compute type, with the reasoning stated."""
     hw = hardware or probe_hardware()
     cores = hw.get("cpu_cores") or 1
+
+    if hw.get("apple_silicon") and hw.get("mlx_available"):
+        mem = hw.get("unified_memory_gb") or 0
+        if mem >= 32:
+            model, reason_mem = "large-v3-mlx", (
+                f"With {mem:.0f} GB of unified memory, this Mac can "
+                "comfortably run Large v3 on the GPU at full precision."
+            )
+        elif mem >= 20:
+            model, reason_mem = "large-v3-turbo-mlx", (
+                f"With {mem:.0f} GB of unified memory, Large v3 Turbo gives "
+                "close to Large v3 accuracy at roughly four times the speed, "
+                "which makes it the right default for interview-length audio."
+            )
+        elif mem >= 12:
+            model, reason_mem = "large-v3-turbo-mlx-4bit", (
+                f"With {mem:.0f} GB of unified memory, the 4-bit Turbo keeps "
+                "Turbo's speed and near-Large-v3 accuracy while leaving "
+                "enough memory free for everything else running on the Mac."
+            )
+        else:
+            model, reason_mem = "small-mlx", (
+                f"With {mem:.0f} GB of unified memory, Small is the largest "
+                "model that leaves headroom for the rest of the system."
+            )
+        return {
+            "model": model,
+            "compute_type": "mlx-native",
+            "device": "mlx",
+            "reason": (
+                reason_mem + " Running on the GPU via MLX is several times "
+                "faster than the CPU path, and uses the same unified memory "
+                "the rest of macOS does, so there is no separate VRAM limit "
+                "to plan around."
+            ),
+            "alternatives": [
+                {
+                    "model": "large-v3-mlx",
+                    "when": "Publication-quality passes, if unified memory allows.",
+                },
+                {
+                    "model": "medium-mlx-4bit",
+                    "when": "Faster turnaround with less memory pressure than Turbo.",
+                },
+                {
+                    "model": "small-mlx",
+                    "when": "Fast rough drafts.",
+                },
+            ],
+        }
 
     if hw.get("cuda_usable"):
         gpu = (hw.get("gpus") or ["GPU"])[0]
