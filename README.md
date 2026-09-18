@@ -1,5 +1,7 @@
 # Local Scribe
 
+## Free and open-source automated audio transcription, captioning, and easy transcript editing software for researchers
+
 <p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
 
 An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org), Jeremy Riel.
