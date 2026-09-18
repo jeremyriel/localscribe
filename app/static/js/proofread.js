@@ -28,12 +28,22 @@
 
   /* ------------------------------------------------------------- requesting */
 
-  async function checkSegments(ids) {
+  /* `liveText` lets a segment currently being typed into be checked against
+     its in-progress DOM content without touching `seg.text` itself -- that
+     field is the editor's own record of the last *saved* text, and its
+     focusout handler decides whether anything actually changed (and so
+     whether to persist it) by comparing against it. Writing the live text
+     there on every keystroke used to make that comparison see no change at
+     all once a real edit landed, since by blur time `seg.text` had already
+     been quietly rewritten to match -- silently skipping the save and,
+     since the same value fed the post-edit re-render, reverting the segment
+     back to whatever its old word timings said the moment focus left it. */
+  async function checkSegments(ids, liveText) {
     const wanted = [];
     ids.forEach((id) => {
       const seg = window.LSEditor.segmentById(id);
       if (!seg) return;
-      const text = seg.text || '';
+      const text = (liveText && liveText.has(id)) ? liveText.get(id) : (seg.text || '');
       if (checked.get(id) === text) return;   // already current
       wanted.push({ id, text });
     });
@@ -48,8 +58,11 @@
       Object.entries(result.issues || {}).forEach(([key, list]) => {
         const id = Number(key);
         issues.set(id, list);
-        const seg = window.LSEditor.segmentById(id);
-        checked.set(id, seg ? (seg.text || '') : '');
+        // Record what was actually sent, not seg.text as it stands now --
+        // by the time this response lands the user may have already typed
+        // more, and seg.text no longer changes while typing (see above).
+        const sent = wanted.find((w) => w.id === id);
+        checked.set(id, sent ? sent.text : '');
       });
       paint();
       updateCount();
@@ -61,7 +74,7 @@
     }
   }
 
-  const recheck = LS.debounce((id) => checkSegments([id]), 450);
+  const recheck = LS.debounce((id, text) => checkSegments([id], new Map([[id, text]])), 450);
 
   /* -------------------------------------------------------------- painting */
 
@@ -342,13 +355,12 @@
     const segEl = textEl.closest('.seg');
     if (!segEl) return;
     const id = Number(segEl.dataset.id);
-    // The model is updated on blur, so read the live text directly.
-    const seg = window.LSEditor.segmentById(id);
-    if (seg) {
-      checked.delete(id);
-      seg.text = textEl.textContent.replace(/\s+/g, ' ').trim();
-      recheck(id);
-    }
+    // seg.text is the editor's own record of the last *saved* text and is
+    // only updated on blur - read the live, in-progress text straight off
+    // the DOM instead of writing it there (see the comment on checkSegments).
+    if (!window.LSEditor.segmentById(id)) return;
+    checked.delete(id);
+    recheck(id, textEl.textContent.replace(/\s+/g, ' ').trim());
   });
 
   document.addEventListener('ls:rendered', () => {

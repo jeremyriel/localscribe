@@ -49,8 +49,14 @@
 
   function segmentHtml(seg) {
     const w = words(seg);
-    if (!w.length) {
-      // No word timings yet (edited and not re-timestamped, or hand typed).
+    if (!w.length || seg.stale_timings) {
+      // No word timings to trust: never transcribed, hand typed, or edited
+      // and not yet re-timestamped. `seg.words` deliberately survives a
+      // text edit (see apply_edits() in app/transcript.py) so a
+      // re-timestamp pass has something to reconcile against, but that
+      // means it no longer matches seg.text -- rendering it here would
+      // silently show the segment's *previous* wording right after the
+      // edit that just changed it.
       return LS.escapeHtml(seg.text || '');
     }
     return w.map((word, index) =>
