@@ -7,11 +7,11 @@
 <p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
 
 <p align="center">
-  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01-Windows-x86_64.exe"><strong>⬇ Download for Windows</strong></a>
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.1-Windows-x86_64.exe"><strong>⬇ Download for Windows</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01-macOS-arm64.dmg"><strong>⬇ Download for macOS</strong></a>
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.1-macOS-arm64.dmg"><strong>⬇ Download for macOS</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01-Linux-x86_64.AppImage"><strong>⬇ Download for Linux</strong></a>
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.1-Linux-x86_64.AppImage"><strong>⬇ Download for Linux</strong></a>
 </p>
 <p align="center">
   <a href="https://github.com/jeremyriel/localscribe/releases/latest">All releases</a>
@@ -20,7 +20,7 @@
 
 An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org); Jeremy Riel, PhD.
 
-**Current version: 1.01** — see [Versioning](#versioning) below.
+**Current version: 1.01.1** — see [Versioning](#versioning) below.
 
 Given the emerging capabilities of open-source language models, The UIC TRAILblazer Lab presents a
 free, open-source, and AI-based automated transcription app that can transcribe audio and
