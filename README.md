@@ -7,11 +7,11 @@
 <p align="center"><img src="app/static/icon/icon-256.png" width="128" height="128" alt="Local Scribe logo"></p>
 
 <p align="center">
-  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.1-Windows-x86_64.exe"><strong>⬇ Download for Windows</strong></a>
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.2-Windows-x86_64.exe"><strong>⬇ Download for Windows</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.1-macOS-arm64.dmg"><strong>⬇ Download for macOS</strong></a>
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.2-macOS-arm64.dmg"><strong>⬇ Download for macOS</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.1-Linux-x86_64.AppImage"><strong>⬇ Download for Linux</strong></a>
+  <a href="https://github.com/jeremyriel/localscribe/releases/latest/download/LocalScribe-1.01.2-Linux-x86_64.AppImage"><strong>⬇ Download for Linux</strong></a>
 </p>
 <p align="center">
   <a href="https://github.com/jeremyriel/localscribe/releases/latest">All releases</a>
@@ -20,7 +20,7 @@
 
 An app by the [UIC TRAILblazer Lab](https://www.trailblazerlab.org); Jeremy Riel, PhD.
 
-**Current version: 1.01.1** — see [Versioning](#versioning) below.
+**Current version: 1.01.2** — see [Versioning](#versioning) below.
 
 Given the emerging capabilities of open-source language models, The UIC TRAILblazer Lab presents a
 free, open-source, and AI-based automated transcription app that can transcribe audio and
@@ -107,13 +107,25 @@ The first time you run one of these scripts, your operating system may block
 it as an unrecognised program, since it isn't signed by a registered
 developer. This only needs to be done once per machine.
 
-- **macOS:** Double-clicking `run.command` may show *"cannot be opened
-  because it is from an unidentified developer."* Right-click (or
-  Control-click) `run.command` and choose **Open**, then confirm **Open** in
-  the dialog that appears — after that, double-clicking works normally. If
-  Local Scribe was downloaded as a ZIP rather than with `git clone`, also run
-  `chmod +x run.command run.sh` once in Terminal first, so the scripts are
-  marked executable.
+- **macOS:** Double-clicking `run.command`, or opening the installed **Local
+  Scribe.app**, may show *"cannot be opened because it is from an
+  unidentified developer."* Right-click (or Control-click) it and choose
+  **Open**, then confirm **Open** in the dialog that appears — after that,
+  double-clicking works normally. If Local Scribe was downloaded as a ZIP
+  rather than with `git clone`, also run `chmod +x run.command run.sh` once
+  in Terminal first, so the scripts are marked executable.
+
+  **If Local Scribe.app opened once but now won't open at all** (no error,
+  it just doesn't launch): this is macOS's Gatekeeper "App Translocation"
+  running the unsigned app from a temporary, randomized location on its very
+  first launch. Local Scribe's own one-time setup is unaffected by later
+  translocated launches as of 1.01.2, but if you're on an older build, the
+  fix is to remove the quarantine flag so macOS stops translocating it:
+  ```
+  xattr -dr com.apple.quarantine "/Applications/Local Scribe.app"
+  ```
+  then delete `~/Library/Application Support/Local Scribe/.venv` if it
+  exists, and reopen the app.
 - **Windows:** Double-clicking `run.bat` may trigger a **"Windows protected
   your PC"** SmartScreen warning. Click **More info**, then **Run anyway**.
   Antivirus software may also flag the first run, since it downloads and

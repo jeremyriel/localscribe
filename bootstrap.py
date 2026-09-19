@@ -299,8 +299,25 @@ def requirements_hash() -> str:
 def ensure_venv() -> Path:
     python = venv_python()
     if not python.exists():
-        say("  First run: creating an isolated Python environment in .venv")
-        say("  (this keeps Local Scribe's packages away from your other projects)")
+        # python.exists() is also False for a *broken* symlink, not just a
+        # missing .venv - which happens for real: on macOS, an unsigned,
+        # quarantined .app is first launched through Gatekeeper's App
+        # Translocation, from a randomized read-only shadow copy of the
+        # bundle. symlinks=True (below) bakes that run's translocated path
+        # into .venv/bin/python, which stops existing the moment that launch
+        # ends - so every later run finds a permanently dangling symlink
+        # here. Rebuilding from a clean directory (clear=True, plus removing
+        # it ourselves first so stale contents can't confuse EnvBuilder's
+        # own comparisons) makes this self-healing instead of a permanent
+        # break: whatever path is real *this* run is what gets baked in.
+        first_time = not VENV.exists()
+        if first_time:
+            say("  First run: creating an isolated Python environment in .venv")
+            say("  (this keeps Local Scribe's packages away from your other projects)")
+        else:
+            say("  The Python environment looks broken (a previous run's path no")
+            say("  longer exists) - rebuilding it.")
+            shutil.rmtree(VENV, ignore_errors=True)
         try:
             # symlinks=True matches the stdlib `python -m venv` CLI default on
             # POSIX. Without it, EnvBuilder copies the interpreter binary,
@@ -308,7 +325,7 @@ def ensure_venv() -> Path:
             # python-build-standalone / `uv python install`, etc.) that bake
             # in a prefix only resolvable through the symlink's real path.
             venv.EnvBuilder(
-                with_pip=True, clear=False, upgrade=False, symlinks=not IS_WINDOWS,
+                with_pip=True, clear=True, upgrade=False, symlinks=not IS_WINDOWS,
             ).create(str(VENV))
         except Exception as exc:
             fail(
