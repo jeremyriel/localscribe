@@ -11,6 +11,8 @@
 </head>
 <body data-token="{{ instance_token }}" data-port="{{ port }}">
 
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
 <header class="topbar">
   <a class="brand" href="/">
     <img src="/static/icon/icon.svg" alt="" width="30" height="30">
@@ -20,10 +22,15 @@
     </span>
   </a>
 
-  <nav class="nav">
-    <a href="/" class="{{ 'on' if request.url.path == '/' else '' }}">Projects</a>
-    <a href="/settings" class="{{ 'on' if request.url.path == '/settings' else '' }}">AI Settings</a>
-    <a href="/about" class="{{ 'on' if request.url.path == '/about' else '' }}">About</a>
+  <nav class="nav" aria-label="Primary navigation">
+    <a href="/" class="{{ 'on' if request.url.path == '/' else '' }}"
+       {% if request.url.path == '/' %}aria-current="page"{% endif %}>Projects</a>
+    <a href="/settings" class="{{ 'on' if request.url.path == '/settings' else '' }}"
+       {% if request.url.path == '/settings' %}aria-current="page"{% endif %}>Settings</a>
+    <a href="/privacy" class="{{ 'on' if request.url.path == '/privacy' else '' }}"
+       {% if request.url.path == '/privacy' %}aria-current="page"{% endif %}>Activity &amp; Diagnostics</a>
+    <a href="/about" class="{{ 'on' if request.url.path == '/about' else '' }}"
+       {% if request.url.path == '/about' %}aria-current="page"{% endif %}>About</a>
   </nav>
 
   <div class="topbar-right">
@@ -57,7 +64,7 @@
   </div>
 </header>
 
-<main class="page">
+<main class="page" id="main-content" tabindex="-1">
   {% block content %}{% endblock %}
 </main>
 

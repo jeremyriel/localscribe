@@ -1,4 +1,4 @@
-/* AI Settings: collect the schema-generated form, model downloads, GPU setup. */
+/* Settings: collect the schema-generated form, model downloads, GPU setup. */
 
 (() => {
   const form = document.getElementById('settings-form');
@@ -45,6 +45,8 @@
     if (!state) return;
     state.textContent = text;
     state.className = `save-state ${cls || ''}`.trim();
+    const bar = document.getElementById('settings-actions');
+    if (bar) bar.classList.toggle('is-dirty', cls === 'dirty');
   }
 
   if (form) {
@@ -72,7 +74,7 @@
         }
       }
 
-      const submit = form.querySelector('button[type=submit]');
+      const submit = document.querySelector('button[type=submit][form="settings-form"]');
       submit.disabled = true;
       setState('Saving...');
 
@@ -103,6 +105,22 @@
     });
   }
 
+  const recheckHealth = document.getElementById('recheck-health');
+  if (recheckHealth) {
+    recheckHealth.addEventListener('click', async () => {
+      recheckHealth.disabled = true;
+      recheckHealth.textContent = 'Checking...';
+      try {
+        await LS.get('/api/health');
+        location.reload();
+      } catch (err) {
+        LS.toast(err.message, 'error');
+        recheckHealth.disabled = false;
+        recheckHealth.textContent = 'Re-check';
+      }
+    });
+  }
+
   /* ------------------------------------------------------ restore defaults */
 
   const resetBtn = document.getElementById('reset-settings');
@@ -125,22 +143,26 @@
 
   /* ------------------------------------------------------- recommendation */
 
-  const applyRec = document.getElementById('apply-rec');
-  if (applyRec) {
-    applyRec.addEventListener('click', () => {
-      const setField = (id, value) => {
-        const el = document.getElementById(id);
+  /* Two recommendations: Turbo is the right transcription default but cannot
+     translate, so translation has its own. Either only fills the form; nothing
+     changes until Save settings is pressed. */
+  [['apply-rec', 'Transcription'], ['apply-rec-translate', 'Translation']].forEach(([id, kind]) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.addEventListener('click', () => {
+      const setField = (fieldId, value) => {
+        const el = document.getElementById(fieldId);
         if (!el) return;
         el.value = value;
         el.dispatchEvent(new Event('change', { bubbles: true }));
       };
-      setField('f-model', applyRec.dataset.model);
-      setField('f-compute_type', applyRec.dataset.compute);
-      setField('f-device', applyRec.dataset.device === 'cuda' ? 'auto' : applyRec.dataset.device);
-      setState('Recommendation applied - press Save settings', 'dirty');
-      LS.toast('Recommendation filled in. Press Save settings to apply it.', 'info');
+      setField('f-model', button.dataset.model);
+      setField('f-compute_type', button.dataset.compute);
+      setField('f-device', button.dataset.device === 'cuda' ? 'auto' : button.dataset.device);
+      setState(`${kind} recommendation applied - press Save settings`, 'dirty');
+      LS.toast(`${kind} recommendation filled in. Press Save settings to apply it.`, 'info');
     });
-  }
+  });
 
   const recheck = document.getElementById('recheck-hw');
   if (recheck) {
@@ -258,6 +280,13 @@
       const act = button.dataset.act;
 
       if (act === 'download') {
+        const downloadBytes = Number(button.dataset.downloadBytes) || 0;
+        const requiredBytes = Number(button.dataset.requiredBytes) || downloadBytes;
+        if (!confirm(
+          `Download ${key}?\n\nThe download is estimated at about ` +
+          `${LS.bytes(downloadBytes)}. Keep about ${LS.bytes(requiredBytes)} ` +
+          'free on the model storage drive for the download and normal app use.'
+        )) return;
         button.disabled = true;
         button.textContent = 'Starting...';
         if (window.LSConsole) LSConsole.open();
@@ -269,7 +298,10 @@
             return;
           }
           button.textContent = 'Downloading...';
-          LS.toast('Download queued. Progress appears in the console.', 'ok');
+          LS.toast(
+            `Download queued; reserve about ${LS.bytes(requiredBytes)} free. ` +
+            'Progress appears in the console.',
+            'ok');
           watchDownload(key, button);
         } catch (err) {
           LS.toast(err.message, 'error', 10000);

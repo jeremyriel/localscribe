@@ -19,11 +19,12 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import catalog, exporters, media, projects
+from . import activity, catalog, exporters, languages, media, projects, validation
 from .config import SETTINGS
 from .console import CONSOLE, fmt_bytes, fmt_duration, fmt_timestamp
 from .engine import ENGINE, Cancelled
 from .transcript import from_engine_segment, new_document, normalise, summary
+from . import vocabulary
 
 # How often a long decode reports progress to the console, in segments.
 CONSOLE_SEGMENT_STRIDE = 5
@@ -79,6 +80,7 @@ class Job:
             "elapsed": round(self.elapsed, 1),
             "project": self.payload.get("slug"),
             "document": self.payload.get("doc_id"),
+            "operation": self.payload.get("operation"),
             "cancel_requested": self.cancel_requested,
         }
 
@@ -132,12 +134,26 @@ class JobQueue:
         )
         return job
 
-    def submit_transcription(self, slug: str, doc_id: str, label: str) -> Job:
-        return self.submit(Job("transcribe", label, slug=slug, doc_id=doc_id))
+    def submit_transcription(
+        self,
+        slug: str,
+        doc_id: str,
+        label: str,
+        language: str | None = None,
+        operation: str | None = None,
+    ) -> Job:
+        """Queue a recording. ``language`` is "auto" or a language code (None
+        leaves the saved setting in charge). ``operation`` is "transcribe" or
+        "translate" (None means transcribe)."""
+        return self.submit(Job(
+            "transcribe", label, slug=slug, doc_id=doc_id, language=language,
+            operation=languages.parse_operation(operation, languages.TRANSCRIBE),
+        ))
 
     def submit_download(self, model_key: str) -> Job:
         spec = catalog.model_spec(model_key)
         label = f"Download {spec.label if spec else model_key}"
+        activity.record("model_download", outcome="started")
         return self.submit(Job("download", label, model=model_key))
 
     # -- queries -----------------------------------------------------------
@@ -181,6 +197,7 @@ class JobQueue:
             "worker_alive": bool(self._worker and self._worker.is_alive()),
             "job": current.id,
             "label": current.label,
+            "operation": current.payload.get("operation"),
             "progress": round(current.progress, 3),
             "detail": current.detail,
             "eta_text": current.stats.get("eta_text"),
@@ -258,6 +275,13 @@ class JobQueue:
 
             finally:
                 job.finished_at = _now()
+                if job.kind == "download":
+                    outcome = {
+                        "done": "complete",
+                        "failed": "failed",
+                        "cancelled": "cancelled",
+                    }.get(job.status, "failed")
+                    activity.record("model_download", outcome=outcome)
                 self._current = None
 
     def _mark_document(self, job: Job, status: str, detail: str, error: str | None = None) -> None:
@@ -280,10 +304,24 @@ class JobQueue:
         record = projects.load_document(slug, doc_id)
         source = projects.media_file(slug, doc_id)
 
+        operation = languages.parse_operation(
+            job.payload.get("operation"), languages.TRANSCRIBE
+        ) or languages.TRANSCRIBE
+        terms = languages.terms(operation)
+
+        # The queue refuses incompatible combinations up front; this repeats
+        # the check at run time because the model setting can change while a
+        # job waits. Failing here costs nothing; running Turbo as a translator
+        # would quietly produce untranslated text.
+        problem = catalog.operation_problem(str(settings.get("model") or ""), operation)
+        if problem:
+            raise RuntimeError(problem)
+
         CONSOLE.step(
-            f"=== Transcribing {record['filename']} ===",
+            f"=== {terms['progressive']} {record['filename']} ===",
             job=job.id, project=project.get("title"), file=record["filename"],
             size=fmt_bytes(record.get("size_bytes")),
+            operation=operation,
         )
 
         def should_cancel() -> bool:
@@ -380,16 +418,32 @@ class JobQueue:
 
         # --- 4. transcribe -------------------------------------------------
         stage("Loading the model", 0.12)
-        projects.set_status(slug, doc_id, "transcribing", "Transcribing")
+        projects.set_status(slug, doc_id, "transcribing", terms["progressive"])
 
         glossary = (project.get("glossary") or "").strip()
-        overrides = {}
+        profile = vocabulary.get_profile(project.get("vocabulary_profile_id"))
+        overrides = vocabulary.transcription_overrides(settings, glossary, profile)
+        # The operation is always passed explicitly, so the project's choice
+        # (not whatever the Settings default is) decides what runs.
+        overrides["task"] = operation
+        requested_language = job.payload.get("language")
+        if requested_language:
+            # Includes "auto", which cancels a language saved in settings.
+            overrides["language"] = requested_language
         if glossary and not (settings.get("initial_prompt") or "").strip():
-            overrides["initial_prompt"] = glossary
             CONSOLE.info(
                 "Using the project glossary as the initial prompt to improve "
                 "spelling of names and jargon.",
                 characters=len(glossary),
+            )
+        if profile:
+            profile_settings = profile.get("settings") or {}
+            target_key = profile.get("target")
+            CONSOLE.info(
+                f"Using vocabulary profile '{profile.get('name')}' "
+                "and its study settings.",
+                profile_id=profile.get("id"), target=target_key,
+                preset_settings=profile_settings,
             )
 
         collected: list = []
@@ -402,7 +456,7 @@ class JobQueue:
             job.progress = 0.12 + 0.83 * snapshot["progress"]
             job.stats = snapshot
             job.detail = (
-                f"Transcribing {int(snapshot['progress'] * 100)}% - "
+                f"{terms['progressive']} {int(snapshot['progress'] * 100)}% - "
                 f"{snapshot['eta_text']} remaining"
             )
 
@@ -436,32 +490,107 @@ class JobQueue:
         )
 
         # --- 5. persist ----------------------------------------------------
-        stage("Saving the transcript", 0.96)
+        stage(f"Saving the {terms['result']}", 0.96)
         doc = new_document(
             duration=duration,
             model=result["stats"].get("model") or str(settings.get("model")),
             language=result["language"],
             language_probability=result["language_probability"],
+            language_requested=result.get("language_requested") or "auto",
             engine=result["params"],
+            operation=operation,
         )
+        # The decoder needs the vocabulary, but project exports should not expose
+        # it through engine-parameter provenance unless the transcript itself does.
+        doc["engine"] = vocabulary.redact_engine_params(doc.get("engine") or {})
+        profile_settings = (profile or {}).get("settings") or {}
+        provenance_settings = {
+            key: overrides.get(key, settings.get(key))
+            for key in (
+                "model", "device", "compute_type", "language", "task", "beam_size",
+                "best_of", "multilingual", "vad_filter",
+            )
+            if overrides.get(key, settings.get(key)) is not None
+        }
+        doc["provenance"] = {
+            "vocabulary_profile": ({
+                "id": profile.get("id"),
+                "name": profile.get("name"),
+                "target": profile.get("target"),
+                "settings": dict(profile_settings),
+            } if profile else None),
+            "transcription_settings": provenance_settings,
+            "vocabulary_sources": [
+                source for source, active in (
+                    ("profile", bool(profile and profile.get("terms"))),
+                    ("project_glossary", bool(glossary and not settings.get("initial_prompt"))),
+                    ("global_initial_prompt", bool(settings.get("initial_prompt"))),
+                    ("global_hotwords", bool(settings.get("hotwords"))),
+                ) if active
+            ],
+            "recorded_at": _now(),
+        }
         doc["segments"] = collected
         doc["stats"] = result["stats"]
         normalise(doc)
+
+        # Asking for a translation does not prove one happened: models that
+        # are not trained for it return the spoken language. Look at the text
+        # and record what it turned out to be.
+        if operation == languages.TRANSLATE:
+            doc["output_check"] = {
+                "verdict": languages.translation_verdict(doc),
+                "status": languages.output_status(doc),
+                "checked": _now(),
+                "model": doc["model"],
+            }
+
+        # A transcript that is being replaced (a redo, or the other operation)
+        # is kept first, so neither result is lost.
+        kept = projects.archive_transcript(slug, doc_id)
+        if kept:
+            CONSOLE.info(
+                "The previous result was kept in this recording's Edit history "
+                f"({kept}) and can be restored.",
+                document=doc_id,
+            )
         projects.save_transcript(slug, doc_id, doc, revision=False)
+        projects.update_document(
+            slug, doc_id,
+            engine=dict(doc.get("engine") or {}),
+            provenance=dict(doc.get("provenance") or {}),
+        )
 
         info_summary = summary(doc)
         stats = result["stats"]
+        status = info_summary["output_status"]
+        unit = "characters" if info_summary["spaceless"] else "words"
         CONSOLE.success(
-            f"Transcription complete: {info_summary['words']} words in "
+            f"{'Translation' if operation == languages.TRANSLATE else 'Transcription'} "
+            f"complete: {info_summary['words']} {unit} in "
             f"{info_summary['segments']} segments, "
             f"{fmt_duration(stats['wall_seconds'])} of processing for "
             f"{fmt_duration(duration)} of audio "
             f"({stats['realtime_factor']:.2f}x realtime)",
             **{k: v for k, v in stats.items() if k not in ("eta", "eta_text")},
         )
+        spoken = languages.name(doc.get("language")) or "the spoken language"
+        if status == "untranslated":
+            CONSOLE.warn(
+                f"Translate to English was requested, but the text is still in "
+                f"{spoken}, not English. This model did not translate. Use a "
+                "standard multilingual model (Small, Medium or Large v3), not Turbo.",
+                document=doc_id, model=doc["model"],
+            )
+        elif status == "unverified":
+            CONSOLE.warn(
+                "Translate to English was requested, but the output could not be "
+                "confirmed to be English. Check it against the audio.",
+                document=doc_id, model=doc["model"],
+            )
         if info_summary["low_confidence"]:
             CONSOLE.info(
-                f"{info_summary['low_confidence']} words were transcribed with "
+                f"{info_summary['low_confidence']} words were {terms['done'].lower()} with "
                 "low confidence and are highlighted in the editor for review.",
                 low_confidence=info_summary["low_confidence"],
             )
@@ -473,10 +602,15 @@ class JobQueue:
         job.stats = dict(stats)
         job.stats["outputs"] = written
         job.detail = "Complete"
-        projects.set_status(
-            slug, doc_id, "transcribed",
-            f"{info_summary['words']} words, ready for review",
-        )
+        if status == "untranslated":
+            detail = f"Not translated: the text is still {spoken}. Review before using it"
+        elif status == "unverified":
+            detail = "Translation to English could not be confirmed. Review before using it"
+        elif status in ("translated", "english_source"):
+            detail = f"{info_summary['words']} words, English translation ready for review"
+        else:
+            detail = f"{info_summary['words']} {unit}, ready for review"
+        projects.set_status(slug, doc_id, "transcribed", detail)
         CONSOLE.success(f"=== {record['filename']} done ===", job=job.id)
 
     def _export(self, slug: str, doc_id: str, doc: dict, project: dict, record: dict) -> dict:
@@ -492,10 +626,31 @@ class JobQueue:
             "notes": project.get("consent_notes"),
             "generated": _now(),
         }
+        formats = [
+            fmt for fmt in (settings.get("formats") or exporters.ALL_FORMATS)
+            if fmt in exporters.WRITERS
+        ]
+        meta["export_provenance"] = validation.provenance(
+            doc, meta["generated"], formats,
+        )
         t0 = time.monotonic()
         written = exporters.export_all(doc, out_dir, settings, meta)
 
         ok = [f for f, v in written.items() if not str(v).startswith("error")]
+        if ok:
+            validation.record_export(doc, meta["generated"], ok)
+            projects.save_transcript(slug, doc_id, doc, revision=False)
+        if "json" in ok:
+            meta["export_provenance"] = validation.provenance(
+                doc, meta["generated"], ok,
+            )
+            try:
+                exporters.write_json(
+                    doc, out_dir / f"{exporters.basename_for(doc)}.json", settings, meta,
+                )
+            except Exception as exc:
+                written["json"] = f"error: {exc}"
+                ok.remove("json")
         bad = {f: v for f, v in written.items() if str(v).startswith("error")}
         CONSOLE.success(
             f"Wrote {len(ok)} output file(s) in {time.monotonic() - t0:.2f}s: "
@@ -517,7 +672,7 @@ class JobQueue:
         if SETTINGS.get("offline_lock"):
             raise RuntimeError(
                 "The offline lock is engaged, so no download can be made. Turn "
-                "it off in AI Settings if you intend to download a model, then "
+                "it off in Settings if you intend to download a model, then "
                 "turn it back on afterwards."
             )
 
@@ -577,7 +732,7 @@ class JobQueue:
             model=model_key, path=str(path),
         )
         CONSOLE.info(
-            "Tip: engage the offline lock in AI Settings now to guarantee no "
+            "Tip: engage the offline lock in Settings now to guarantee no "
             "further network access."
         )
 

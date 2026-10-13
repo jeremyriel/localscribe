@@ -23,7 +23,7 @@
   <strong>No transcription model is downloaded yet</strong>
   Local Scribe needs Whisper model weights on disk before it can transcribe
   anything. This is a one-time download and the only outbound request the
-  application makes. <a href="/settings">Open AI Settings to download a model.</a>
+  application makes. <a href="/settings">Open Settings to download a model.</a>
 </div>
 {% endif %}
 
@@ -34,6 +34,9 @@
 <!-- New project form -->
 <form class="card" id="new-project" hidden>
   <h2>New project</h2>
+  {% with sensitivity_id="np-sensitivity", sensitivity_value="unknown_treat_as_phi" %}
+    {% include "sensitivity_field.html" %}
+  {% endwith %}
   <div class="field">
     <label for="np-title">Project title</label>
     <input type="text" id="np-title" name="title" required
@@ -65,6 +68,7 @@
   {% for p in projects %}
   <a class="proj-card" href="/project/{{ p.slug }}">
     <h3>{{ p.title }}</h3>
+    <div class="meta">User-declared sensitivity: {{ sensitivity_labels[p.data_sensitivity] }}</div>
     {% if p.description %}
       <div class="meta">{{ p.description[:150] }}{% if p.description|length > 150 %}...{% endif %}</div>
     {% endif %}
@@ -90,13 +94,62 @@
 </div>
 {% endif %}
 
+<div class="card" id="recovery-library">
+  <h2>Recovery snapshots</h2>
+  <p class="small muted">
+    Snapshots stay on this computer, including after a project is deleted.
+    They are not a substitute for a separate backup.
+  </p>
+  {% if snapshots %}
+  <div class="field-row">
+    <div class="field">
+      <label for="recovery-snapshot-select">Saved snapshot</label>
+      <select id="recovery-snapshot-select">
+        {% for snapshot in snapshots %}
+        <option value="{{ snapshot.snapshot_id }}" data-slug="{{ snapshot.project_slug }}">
+          {{ snapshot.project_slug }} · {{ snapshot.created[:19].replace('T', ' ') }} ·
+          {{ '{:,}'.format(snapshot.size_bytes) }} bytes ·
+          {{ {'included': 'source media included', 'omitted': 'source media omitted', 'none': 'no recordings', 'unknown': 'media not recorded (older snapshot)'}[snapshot.media] }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="recovery-restore-mode">If the project exists</label>
+      <select id="recovery-restore-mode">
+        <option value="abort">Abort (default)</option>
+        <option value="rename">Restore as a separate project</option>
+        <option value="replace">Replace it (create safety snapshot)</option>
+      </select>
+    </div>
+    <div class="field" style="align-self:end">
+      <button type="button" class="btn" id="restore-library-snapshot-btn">
+        Restore selected snapshot
+      </button>
+    </div>
+  </div>
+  {% else %}
+  <p class="small muted">No local recovery snapshots have been created.</p>
+  {% endif %}
+  <h3>Recent recovery activity</h3>
+  {% if activities %}
+  <ul class="small">
+    {% for event in activities %}
+    <li>{{ event.day }}, {{ event.time }} · {{ event.summary }} · {{ event.status_label }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="small muted">No recovery actions recorded.</p>
+  {% endif %}
+</div>
+
 <div class="card" style="margin-top:1.5rem">
   <h3>How this protects your data</h3>
   <p class="small muted">
     Audio and transcripts never leave this computer. There is no cloud service,
     no account, no telemetry, and no third-party asset loading in this
     interface. Transcription runs locally with OpenAI's Whisper models. Once
-    your model is downloaded you can engage the offline lock in AI Settings,
+    your model is downloaded you can engage the offline lock in Settings,
     which blocks all outbound network access at the process level.
     <a href="/about">Read more about the data-security design.</a>
   </p>

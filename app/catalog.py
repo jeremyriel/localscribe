@@ -303,6 +303,99 @@ def model_spec(key: str) -> ModelSpec | None:
     return CATALOG_BY_KEY.get(key)
 
 
+def disk_estimate(key: str) -> dict:
+    """Estimate transfer size and free space to reserve for a model download."""
+    spec = model_spec(key)
+    download_bytes = spec.download_mb * 1_000_000 if spec else 0
+    # Leave ten percent for filesystem metadata and differences from catalogue
+    # estimates; the weights remain in the Hugging Face cache after download.
+    recommended_free_bytes = int(download_bytes * 1.1 + 0.5)
+    return {
+        "download_bytes": download_bytes,
+        "recommended_free_bytes": recommended_free_bytes,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Which models can translate speech to English
+# ---------------------------------------------------------------------------
+# Whisper's translate task is only reliable on the standard multilingual
+# checkpoints. OpenAI's documentation states that Turbo is not trained for
+# translation (it returns the spoken language instead), and English-only
+# models have no non-English speech to translate. Tiny and Base accept the
+# task but are too weak to trust. This is a rule over the catalogue entries,
+# not a new table, so a model added later is classified by what it is.
+
+OK, LIMITED, UNSUPPORTED = "ok", "limited", "unsupported"
+
+
+def translation_support(spec: ModelSpec | None) -> dict:
+    """``{level, reason}`` for translating speech to English with this model."""
+    if spec is None:
+        return {"level": OK, "reason": ""}
+    if spec.languages == "English only":
+        return {
+            "level": UNSUPPORTED,
+            "reason": (
+                f"{spec.label} only understands English, so it cannot "
+                "translate speech in other languages."
+            ),
+        }
+    if "turbo" in spec.key:
+        return {
+            "level": UNSUPPORTED,
+            "reason": (
+                f"{spec.label} is not trained for translation. It returns the "
+                "spoken language instead of English."
+            ),
+        }
+    if spec.key.startswith(("tiny", "base")):
+        return {
+            "level": LIMITED,
+            "reason": (
+                f"{spec.label} can translate, but its translations are too "
+                "error-prone to rely on. Small or larger is advised."
+            ),
+        }
+    return {"level": OK, "reason": ""}
+
+
+def operation_problem(model_key: str, operation: str, hardware: dict | None = None) -> str | None:
+    """Why this model cannot do this operation, or None if it can.
+
+    Transcription works on every catalogue model. The message names a
+    suitable replacement but never selects or downloads one.
+    """
+    if operation != "translate":
+        return None
+    support = translation_support(model_spec(model_key))
+    if support["level"] != UNSUPPORTED:
+        return None
+    suggestion = suggest_translation_model(hardware)
+    advice = ""
+    if suggestion:
+        advice = (
+            f" Suggested: {suggestion['label']}"
+            + ("" if suggestion["downloaded"] else " (not downloaded yet)")
+            + ". Choose it in Settings."
+        )
+    return support["reason"] + " Translate to English needs a standard multilingual model." + advice
+
+
+def suggest_translation_model(hardware: dict | None = None) -> dict | None:
+    """The recommended translation-capable model, as ``{key, label, downloaded, reason}``."""
+    rec = recommend(hardware, task="translate")
+    spec = model_spec(rec["model"])
+    if spec is None:
+        return None
+    return {
+        "key": spec.key,
+        "label": spec.label,
+        "downloaded": is_downloaded(spec.key),
+        "reason": rec["reason"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Local model storage
 # ---------------------------------------------------------------------------
@@ -464,7 +557,7 @@ def probe_hardware() -> dict:
                 f"{names} detected, but the CUDA support libraries are "
                 f"missing ({', '.join(absent)}). This is usually a missing "
                 "cuDNN 9 or cuBLAS 12 library. Use 'Install GPU support' in "
-                "AI Settings to add them. Transcription runs on CPU until then."
+                "Settings to add them. Transcription runs on CPU until then."
             )
     elif gpu_names:
         names = ", ".join(sorted(set(gpu_names)))
@@ -484,7 +577,7 @@ def probe_hardware() -> dict:
             info["warnings"].append(
                 f"{count} NVIDIA GPU(s) detected ({names}) but the CUDA runtime "
                 "cannot use them. This is usually a missing cuDNN 9 or cuBLAS "
-                "12 library. Use 'Install GPU support' in AI Settings to add "
+                "12 library. Use 'Install GPU support' in Settings to add "
                 "them. Transcription runs on CPU until then."
             )
 
@@ -627,7 +720,7 @@ def _explain_cuda_failure(message: str, driver: str | None) -> str:
     if "cudnn" in lowered or "cublas" in lowered:
         return (
             "An NVIDIA GPU is present but the CUDA support libraries are "
-            "missing. Use 'Install GPU support' in AI Settings to add cuDNN 9 "
+            "missing. Use 'Install GPU support' in Settings to add cuDNN 9 "
             f"and cuBLAS 12. Original error: {message}"
         )
     return (
@@ -641,7 +734,83 @@ def _explain_cuda_failure(message: str, driver: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def recommend(hardware: dict | None = None) -> dict:
+def recommend(hardware: dict | None = None, task: str = "transcribe") -> dict:
+    """Recommend a model and compute type for an operation, with the reasoning."""
+    hw = hardware or probe_hardware()
+    rec = _recommend_transcription(hw)
+    if task != "translate":
+        return rec
+    return _translation_variant(rec, hw)
+
+
+def _translation_variant(rec: dict, hw: dict) -> dict:
+    """Re-pick the model for Translate to English, keeping device and precision.
+
+    Turbo (the transcription default on most hardware) is not trained for
+    translation, and English-only models cannot do it. The choice follows the
+    same hardware tiers as transcription, one step off Turbo: Medium or Large
+    v3 where there is room, Small as the practical floor.
+    """
+    device = rec["device"]
+    cores = hw.get("cpu_cores") or 1
+    mem = hw.get("unified_memory_gb") or 0
+
+    if device == "mlx":
+        if mem >= 32:
+            model, why = "large-v3-mlx", (
+                f"With {mem:.0f} GB of unified memory, Large v3 runs on the "
+                "GPU at full precision and is the most accurate translator.")
+        elif mem >= 16:
+            model, why = "medium-mlx", (
+                f"With {mem:.0f} GB of unified memory, Medium translates well "
+                "on the GPU and leaves room for everything else.")
+        else:
+            model, why = "small-mlx", (
+                f"With {mem:.0f} GB of unified memory, Small is the largest "
+                "translation-capable model that leaves headroom.")
+        alternatives = [
+            {"model": "large-v3-mlx", "when": "Best translation quality, if unified memory allows."},
+            {"model": "medium-mlx", "when": "A good balance of quality and memory."},
+            {"model": "small-mlx", "when": "Fast drafts on a smaller Mac."},
+        ]
+    elif device == "cuda":
+        model, why = "medium", (
+            "Medium translates well and fits on most GPUs. Available video "
+            "memory is not measured here, so Large v3 is offered as the "
+            "upgrade rather than assumed.")
+        alternatives = [
+            {"model": "large-v3", "when": "Best translation quality, if the card has about 10 GB of video memory."},
+            {"model": "small", "when": "Faster drafts on a smaller card."},
+        ]
+    else:
+        if cores >= 12:
+            model, why = "medium", (
+                f"With {cores} logical cores, Medium translates well and runs "
+                "at roughly realtime on CPU.")
+        else:
+            model, why = "small", (
+                f"With {cores} logical cores, Small is the practical choice "
+                "on CPU" + (" and will be slow; treat the result as a draft."
+                            if cores < 6 else "."))
+        alternatives = [
+            {"model": "medium", "when": "Better translations if you can wait for them."},
+            {"model": "large-v3", "when": "Best quality; impractically slow on CPU for long files."},
+        ]
+
+    out = dict(rec)
+    out.update({
+        "model": model,
+        "task": "translate",
+        "reason": (
+            why + " Large v3 Turbo is deliberately not recommended: it is not "
+            "trained for translation."
+        ),
+        "alternatives": alternatives,
+    })
+    return out
+
+
+def _recommend_transcription(hardware: dict | None = None) -> dict:
     """Recommend a model and compute type, with the reasoning stated."""
     hw = hardware or probe_hardware()
     cores = hw.get("cpu_cores") or 1
@@ -773,14 +942,23 @@ def recommend(hardware: dict | None = None) -> dict:
 def catalog_payload(hardware: dict | None = None) -> dict:
     hw = hardware or probe_hardware()
     rec = recommend(hw)
+    rec_translate = recommend(hw, task="translate")
     models = []
     for spec in CATALOG:
         entry = asdict(spec)
+        entry.update(disk_estimate(spec.key))
         entry["downloaded"] = is_downloaded(spec.key)
         entry["disk_bytes"] = model_disk_bytes(spec.key) if entry["downloaded"] else 0
         entry["recommended"] = spec.key == rec["model"]
+        entry["recommended_translate"] = spec.key == rec_translate["model"]
+        entry["translation"] = translation_support(spec)
         entry["fits_vram"] = True
         if hw.get("cuda_usable") and hw.get("gpus"):
             entry["fits_vram"] = True  # VRAM query is unreliable; do not bluff.
         models.append(entry)
-    return {"models": models, "recommendation": rec, "hardware": hw}
+    return {
+        "models": models,
+        "recommendation": rec,
+        "recommendation_translate": rec_translate,
+        "hardware": hw,
+    }

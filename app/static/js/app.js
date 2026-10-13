@@ -106,12 +106,19 @@ const LS = (() => {
 
   function debounce(fn, ms) {
     let timer = null;
+    let pending = Promise.resolve();
+    const run = (...args) => {
+      timer = null;
+      pending = Promise.resolve().then(() => fn(...args));
+      return pending;
+    };
     const wrapped = (...args) => {
       clearTimeout(timer);
-      timer = setTimeout(() => { timer = null; fn(...args); }, ms);
+      timer = setTimeout(() => { run(...args).catch(() => {}); }, ms);
     };
     wrapped.flush = (...args) => {
-      if (timer) { clearTimeout(timer); timer = null; fn(...args); }
+      if (timer) { clearTimeout(timer); return run(...args); }
+      return pending;
     };
     wrapped.pending = () => timer !== null;
     return wrapped;
@@ -133,7 +140,8 @@ const LS = (() => {
 
     if (worker && worker.busy) {
       cls = 'pill-busy';
-      label = 'Transcribing';
+      label = worker.operation === 'translate' ? 'Translating'
+        : (worker.operation ? 'Transcribing' : 'Working');
       detail = worker.eta_text && worker.eta_text !== 'estimating'
         ? `${Math.round((worker.progress || 0) * 100)}% - ${worker.eta_text} left`
         : `${Math.round((worker.progress || 0) * 100)}% complete`;
@@ -151,7 +159,7 @@ const LS = (() => {
     } else if (!engine.model_downloaded) {
       cls = 'pill-error';
       label = 'No model';
-      detail = 'Download one in AI Settings';
+      detail = 'Download one in Settings';
     } else {
       cls = 'pill-unknown';
       label = 'AI linked, idle';
@@ -172,7 +180,7 @@ const LS = (() => {
     const rows = [
       ['State', e.detail || e.state],
       ['Selected model', e.selected_model_label || e.selected_model],
-      ['Downloaded', e.model_downloaded ? 'yes' : 'no - download it in AI Settings'],
+      ['Downloaded', e.model_downloaded ? 'yes' : 'no - download it in Settings'],
       ['Loaded model', e.loaded_model || 'not loaded'],
       ['Device', (e.loaded_device || e.target_device || '').toUpperCase()],
       ['Precision', e.loaded_compute || e.target_compute],

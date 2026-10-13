@@ -1,0 +1,14 @@
+<div class="field">
+  <label for="{{ sensitivity_id }}">Source media data sensitivity</label>
+  <select id="{{ sensitivity_id }}" name="data_sensitivity" aria-describedby="{{ sensitivity_id }}-help">
+    {% for value, label in sensitivity_labels.items() %}
+    <option value="{{ value }}" {% if value == sensitivity_value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <p class="help" id="{{ sensitivity_id }}-help">
+    PHI means protected health information. You are responsible for declaring
+    the sensitivity of this project's source media. This selection controls
+    future backup safeguards; it does not determine whether data is PHI or
+    provide compliance advice. If unsure, choose “Unknown — treat as PHI”.
+  </p>
+</div>

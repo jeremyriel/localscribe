@@ -1,0 +1,11 @@
+# Packages needed only to run the tests (python -m tests.<name>).
+# Not shipped in the installers.
+-r requirements.txt
+
+# fastapi.testclient (used by tests/test_languages.py to exercise the HTTP
+# API and rendered pages) needs an HTTP client package. httpx works with every
+# supported Starlette; the newest Starlette prefers its successor, httpx2, but
+# still falls back to httpx (with a DeprecationWarning). httpx currently also
+# arrives indirectly via huggingface-hub, which is not guaranteed, so it is
+# declared here.
+httpx>=0.27,<1.0

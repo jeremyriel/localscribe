@@ -1,4 +1,14 @@
 {% extends "base.html" %}
+{# Wording follows what is stored on THIS document, never the project's current operation. #}
+{% set is_translation = info and info.output_status in ['translated', 'english_source'] %}
+{% set noun = 'translation' if is_translation else 'transcript' %}
+{% set show_confidence = not info or info.confidence_meaningful %}
+{% set status_labels = {
+  'original': 'Transcript',
+  'translated': 'English translation (machine)',
+  'english_source': 'English translation (the speech was English)',
+  'untranslated': 'Translation requested - the text is NOT English',
+  'unverified': 'Translation requested - English not confirmed'} %}
 {% block title %}{{ document.filename }} - {{ app_name }}{% endblock %}
 
 {% block content %}
@@ -8,7 +18,7 @@
   {{ document.filename }}
 </div>
 
-<div class="page-head">
+<div class="page-head page-head-compact">
   <div class="grow">
     <h1>{{ document.filename }}</h1>
     <p class="small muted" id="doc-summary">
@@ -17,22 +27,68 @@
         {{ info.segments }} segments &middot;
         {{ (document.duration or 0) | round | int // 60 }}m
         {{ ((document.duration or 0) | round | int) % 60 }}s
-        {% if info.language %}&middot; {{ info.language }}{% endif %}
+        {% if info.language %}&middot; {{ info.language_name }}{% if info.language_requested == 'auto' %} (detected){% elif info.language_requested %} (selected){% endif %}{% endif %}
+        {% if info.operation == 'translate' %}&middot; {{ status_labels[info.output_status] }}{% endif %}
         &middot; {{ info.model }}
       {% endif %}
     </p>
+    {% if has_transcript %}
+    <nav class="tool-links" aria-label="Jump to a tools panel">
+      <span class="small muted">Tools:</span>
+      <a href="#tool-review" data-open-tool>Review</a>
+      <a href="#tool-speakers" data-open-tool>Speakers</a>
+      <a href="#tool-deid" data-open-tool>De-identification</a>
+      <a href="#tool-notes" data-open-tool>Comments</a>
+      <a href="#tool-help" data-open-tool>Help</a>
+    </nav>
+    {% endif %}
   </div>
+  <ol class="workflow-stages" aria-label="Transcript workflow">
+    {% for stage in workflow.stages %}
+    <li class="{{ 'active' if stage.active else '' }}"
+        {% if stage.active %}aria-current="step"{% endif %}>{{ stage.label }}</li>
+    {% endfor %}
+  </ol>
 </div>
 
 {% if not has_transcript %}
   <div class="empty">
-    <h3>Not transcribed yet</h3>
+  <h3>{{ doc_terms.not_yet }}</h3>
+    <p class="badge">{{ workflow.label }}</p>
     <p>
-      {{ document.status_detail or 'This recording has not been transcribed.' }}
+      {{ document.status_detail or doc_terms.not_yet_body }}
     </p>
-    <a class="btn btn-primary" href="/project/{{ project.slug }}">Back to the project to transcribe it</a>
+    <a class="btn btn-primary" href="/project/{{ project.slug }}">{{ doc_terms.back_link }}</a>
   </div>
 {% else %}
+
+{% if info.output_status == 'untranslated' %}
+<div class="notice notice-warn" id="output-notice" role="status">
+  <strong>This is not an English translation.</strong>
+  Translate to English was requested, but the text is still in {{ info.language_name or 'the spoken language' }}.
+  The model used ({{ info.model }}) did not translate it; Large v3 Turbo, for
+  example, is not trained for translation. Treat this as an original-language
+  transcript. To get an English translation, choose a standard multilingual
+  model (Small, Medium or Large v3) in Settings, set the project to
+  Translate to English, and run it again from the project page. This version is
+  kept in Edit history.
+</div>
+{% elif info.output_status == 'unverified' %}
+<div class="notice notice-warn" id="output-notice" role="status">
+  <strong>English translation not confirmed.</strong>
+  Translate to English was requested, but the text could not be confirmed to be
+  English (it may be mixed or very short). Check it against the audio before
+  relying on it as a translation.
+</div>
+{% elif info.output_status == 'translated' %}
+<div class="notice notice-info small" id="output-notice" role="status">
+  <strong>English machine translation</strong> of {{ info.language_name or 'the' }}
+  speech, made by Whisper on this computer. It is not a record of what was said;
+  check it against the audio. Word confidence is not shown because it does
+  not measure whether a translation is accurate. The original-language
+  transcript, if there was one, is kept in Edit history.
+</div>
+{% endif %}
 
 <div class="editor-layout">
   <div>
@@ -43,9 +99,14 @@
 
       <div class="player-row" style="margin-top:.5rem">
         <div class="transport">
-          <button type="button" class="btn btn-small" id="btn-play">Play</button>
-          <button type="button" class="btn btn-small btn-quiet" id="btn-back">&minus;2s</button>
-          <button type="button" class="btn btn-small btn-quiet" id="btn-fwd">+2s</button>
+          <button type="button" class="btn btn-small" id="btn-play"
+                  aria-label="Play audio">Play</button>
+          <button type="button" class="btn btn-small btn-quiet" id="btn-back"
+                  aria-label="Back 2 seconds">&minus;2s</button>
+          <button type="button" class="btn btn-small btn-quiet" id="btn-fwd"
+                  aria-label="Forward 2 seconds">+2s</button>
+          <button type="button" class="btn btn-small btn-quiet" id="btn-replay"
+                  aria-label="Replay the current segment">Replay segment</button>
           <label class="chk" title="Loop the segment you are editing">
             <input type="checkbox" id="loop-seg"> Loop segment
           </label>
@@ -55,7 +116,7 @@
         </div>
         <div class="spacer"></div>
         <label class="small muted" for="rate">Speed</label>
-        <select id="rate" style="width:auto">
+        <select id="rate" style="width:auto" aria-label="Playback speed">
           <option value="0.5">0.5x</option>
           <option value="0.75">0.75x</option>
           <option value="1" selected>1x</option>
@@ -63,72 +124,64 @@
           <option value="1.5">1.5x</option>
           <option value="2">2x</option>
         </select>
+        <label class="small muted" for="pre-roll">Pre-roll</label>
+        <select id="pre-roll" class="roll-select" aria-label="Playback pre-roll">
+          <option value="0">0s</option><option value="0.5">0.5s</option>
+          <option value="1" selected>1s</option><option value="2">2s</option>
+          <option value="3">3s</option>
+        </select>
+        <label class="small muted" for="post-roll">Post-roll</label>
+        <select id="post-roll" class="roll-select" aria-label="Playback post-roll">
+          <option value="0">0s</option><option value="0.5">0.5s</option>
+          <option value="1" selected>1s</option><option value="2">2s</option>
+          <option value="3">3s</option>
+        </select>
         <span class="time-readout" id="time-readout">00:00 / 00:00</span>
       </div>
 
+      <div class="ribbon-tools" role="group" aria-label="Waveform zoom">
+        <span class="small muted">Waveform zoom</span>
+        <button type="button" class="btn btn-small btn-quiet" id="zoom-out"
+                aria-label="Zoom waveform out" title="Zoom out (−)">−</button>
+        <button type="button" class="btn btn-small btn-quiet" id="zoom-in"
+                aria-label="Zoom waveform in" title="Zoom in (+)">+</button>
+        <button type="button" class="btn btn-small btn-quiet" id="zoom-fit"
+                aria-label="Show full waveform">Fit</button>
+        <span class="small muted" id="zoom-level" aria-live="polite">Full recording</span>
+      </div>
       <div class="ribbon-wrap">
-        <canvas class="ribbon" id="ribbon" height="72"></canvas>
+        <canvas class="ribbon" id="ribbon" height="72" tabindex="0" role="slider"
+                aria-label="Waveform playback position" aria-valuemin="0"
+                aria-valuemax="{{ document.duration or 0 }}" aria-valuenow="0"
+                aria-valuetext="00:00"></canvas>
       </div>
-      <p class="ribbon-hint">
-        Click anywhere on the ribbon to play from that point. Click any word in
-        the transcript to hear it again. Hold the pointer over a word to see
-        how many other times it appears. Double-click a word to find and
-        replace it everywhere.
-        <kbd>Space</kbd> play/pause &middot;
-        <kbd>&larr;</kbd><kbd>&rarr;</kbd> 2s &middot;
-        <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> 5s &middot;
-        <kbd>Esc</kbd> leave the text field
-      </p>
     </div>
 
-    <!-- Speaker roster -->
-    <div class="card speaker-card">
-      <div class="row" style="margin-bottom:.6rem">
-        <h2 style="margin:0">Speakers</h2>
-        <div class="stepper" role="group" aria-label="Number of speakers">
-          <button type="button" id="spk-minus" aria-label="Remove a speaker">&minus;</button>
-          <input type="number" id="spk-count" min="0" max="12" step="1"
-                 value="{{ speakers|length }}" aria-label="Number of speakers">
-          <button type="button" id="spk-plus" aria-label="Add a speaker">+</button>
-        </div>
-        <span class="save-state" id="spk-state"></span>
-        <div class="spacer"></div>
-        <span class="small muted">
-          Click a tag on a turn to assign it, or press
-          <kbd>1</kbd>&ndash;<kbd>9</kbd> on the turn you are reading.
-        </span>
-      </div>
-
-      <div id="speaker-rows" class="speaker-rows"></div>
-
-      <p class="small muted" id="speaker-empty" hidden>
-        No speakers yet. Add one or more above, give each a name and a short
-        tag, then click through the transcript assigning turns.
-      </p>
-    </div>
-
-    <!-- Transcript -->
+    <!-- Transcript or English translation, as stored on this document -->
     <div class="card">
       <div class="row" style="margin-bottom:.6rem">
-        <h2 style="margin:0">Transcript</h2>
+        <h2 style="margin:0">{{ 'English translation' if is_translation else 'Transcript' }}</h2>
         <span class="save-state" id="save-state">Saved</span>
         <div class="spacer"></div>
         <button type="button" class="btn btn-small btn-quiet" id="find-toggle"
                 title="Find and replace (Ctrl+F)">Find</button>
         <button type="button" class="btn btn-small btn-quiet" id="jump-issue"
+                {% if not proofreading.language_supported %}disabled{% endif %}
                 title="Jump to the next spelling or artefact flag">
           Next flag <span class="badge" id="issue-count">0</span>
         </button>
+        {% if show_confidence %}
         <button type="button" class="btn btn-small btn-quiet" id="jump-low"
                 title="Jump to the next word the model was unsure about">
           Next uncertain word
         </button>
+        {% endif %}
       </div>
 
       <!-- Find and replace -->
       <div class="findbar" id="findbar" hidden>
         <div class="find-row">
-          <input type="text" id="find-input" placeholder="Find in this transcript"
+          <input type="text" id="find-input" placeholder="Find in this {{ noun }}"
                  aria-label="Find" autocomplete="off" spellcheck="false">
           <span class="find-count" id="find-count">0 matches</span>
           <button type="button" class="btn btn-small btn-quiet" id="find-prev"
@@ -162,22 +215,32 @@
         </div>
       </div>
 
-      <div class="legend" style="margin-bottom:.7rem">
-        <span><span class="swatch" style="background:#fdf0d8;box-shadow:inset 0 -2px 0 #e6b455"></span>
-          low model confidence (below {{ (low_confidence * 100) | int }}%)</span>
-        <span><span class="swatch" style="background:var(--accent-soft)"></span> currently playing</span>
-        <span><span class="swatch" style="background:var(--warn-soft)"></span> edited, needs re-timestamping</span>
-        {% if proofreading.available %}
-        <span><span class="swatch swatch-spell"></span> not in dictionary</span>
-        <span><span class="swatch swatch-artefact"></span> likely transcription slip</span>
+      {% if not proofreading.language_supported %}
+      <div class="notice notice-info small" id="proofread-language-note" style="margin-bottom:.7rem">
+        {% if proofreading.language == 'und' %}
+        Spelling and transcription-artefact checks are English-only. They are
+        switched off because the language of this text could not be established
+        (a requested translation to English was not confirmed), so nothing is
+        flagged. Review it against the audio; use Next uncertain word to find
+        the passages the model was least sure of.
+        {% else %}
+        Spelling and transcription-artefact checks are English-only, so they are
+        switched off for this {{ proofreading.language_name or 'non-English' }}
+        {{ noun }} and nothing is flagged. Review it against the audio; use
+        Next uncertain word to find the passages the model was least sure of.
         {% endif %}
       </div>
-
-      {% if not proofreading.available %}
+      {% elif not proofreading.available %}
       <div class="notice small" style="margin-bottom:.7rem">
         The spelling dictionary is not installed, so proofreading is off. A
         maintainer can build it by running
         <code>assets/dictionary/build_dictionary.py</code>.
+      </div>
+      {% elif not proofreading.language_supported %}
+      <div class="notice small" style="margin-bottom:.7rem">
+        Proofreading is currently supported for English transcripts only.
+        Other languages remain available for Whisper transcription, but spelling
+        and transcription-artefact checks are disabled to avoid misleading flags.
       </div>
       {% endif %}
 
@@ -187,6 +250,258 @@
 
   <!-- Side panel -->
   <aside class="side-panel">
+    <div class="tool-panels">
+      <details class="settings-group" id="tool-review">
+        <summary id="review-title">Review Mode</summary>
+        <div class="settings-body">
+          <section class="review-queue" id="review-queue" aria-labelledby="review-title">
+            <div class="row">
+              <div class="grow">
+                <p class="small muted" id="review-progress">Preparing review queue…</p>
+              </div>
+              <button type="button" class="btn btn-small btn-primary" id="review-next">
+                Next unresolved
+              </button>
+            </div>
+            <progress id="review-progress-bar" max="100" value="0"
+                      aria-label="Review completion"></progress>
+            <div class="review-filters" aria-label="Review queue filters">
+              <label class="chk"><input type="checkbox" data-review-filter="low_confidence" checked> Low confidence</label>
+              <label class="chk"><input type="checkbox" data-review-filter="artifact" checked> Possible artifacts</label>
+              <label class="chk"><input type="checkbox" data-review-filter="unassigned" checked> Unassigned speakers</label>
+              <label class="chk"><input type="checkbox" data-review-filter="flagged" checked> Flags</label>
+              <label class="chk"><input type="checkbox" data-review-filter="changed" checked> Changed since validation</label>
+            </div>
+            <div class="review-counts" id="review-counts" aria-live="polite"></div>
+            <p class="small muted" id="review-empty" hidden>Nothing unresolved matches these filters.</p>
+            <ol class="review-items" id="review-items"></ol>
+          </section>
+        </div>
+      </details>
+
+      <details class="settings-group" id="tool-speakers">
+        <summary>Speakers</summary>
+        <div class="settings-body speaker-card">
+          <div class="row" style="margin-bottom:.6rem">
+            <div class="stepper" role="group" aria-label="Number of speakers">
+              <button type="button" id="spk-minus" aria-label="Remove a speaker">&minus;</button>
+              <input type="number" id="spk-count" min="0" max="12" step="1"
+                     value="{{ speakers|length }}" aria-label="Number of speakers">
+              <button type="button" id="spk-plus" aria-label="Add a speaker">+</button>
+            </div>
+            <span class="save-state" id="spk-state"></span>
+          </div>
+          <p class="small muted">
+            Click a tag on a turn to assign it, or press
+            <kbd>1</kbd>&ndash;<kbd>9</kbd> on the turn you are reading.
+          </p>
+
+          <div id="speaker-rows" class="speaker-rows"></div>
+
+          <p class="small muted" id="speaker-empty" hidden>
+            No speakers yet. Add one or more above, give each a name and a short
+            tag, then click through the {{ noun }} assigning turns.
+          </p>
+        </div>
+      </details>
+
+      <details class="settings-group" id="tool-deid">
+        <summary id="deidentification-title">De-identification review assistance (assistive flags only)</summary>
+        <div class="settings-body">
+          <section id="deidentification-review" aria-labelledby="deidentification-title">
+            <p class="notice notice-warn">
+              Assistive flags only: findings can be missed or incorrect. Review the
+              transcript and every replacement yourself. This is not anonymization,
+              a compliance guarantee, or a substitute for an approved privacy review.
+            </p>
+            <p class="small muted">
+              The findings report and reversible replacement map stay in this local
+              project and are excluded from shareable project and review exports.
+            </p>
+            <div class="review-filters" aria-label="Identifier types to flag">
+              <label class="chk"><input type="checkbox" data-deid-flag="email" checked> Email</label>
+              <label class="chk"><input type="checkbox" data-deid-flag="phone" checked> Phone</label>
+              <label class="chk"><input type="checkbox" data-deid-flag="ssn" checked> Possible SSN</label>
+              <label class="chk"><input type="checkbox" data-deid-flag="date" checked> Dates</label>
+              <label class="chk"><input type="checkbox" data-deid-flag="ip_address" checked> IP address</label>
+              <label class="chk"><input type="checkbox" data-deid-flag="address" checked> Possible street address</label>
+              <label class="chk"><input type="checkbox" data-deid-flag="url" checked> Web address</label>
+            </div>
+            <div class="field">
+              <label for="deid-custom-patterns">Additional custom patterns (one per line: label: regex)</label>
+              <textarea id="deid-custom-patterns" rows="3"
+                        placeholder="Patient ID: \bPT-\d{6}\b"></textarea>
+            </div>
+            <div class="row">
+              <button type="button" class="btn btn-small btn-primary" id="deid-scan">
+                Scan for possible identifiers
+              </button>
+              <span class="small muted" id="deid-status" role="status" aria-live="polite"></span>
+            </div>
+            <div class="review-counts" id="deid-counts" aria-live="polite"></div>
+            <ol class="review-items" id="deid-items"></ol>
+          </section>
+        </div>
+      </details>
+
+      <details class="settings-group" id="tool-notes">
+        <summary id="annotations-title">Timestamped comments and questions</summary>
+        <div class="settings-body">
+          <section class="review-queue" id="annotations-panel" aria-labelledby="annotations-title">
+            <p class="small muted">
+              Notes are saved with this transcript and travel in offline review packages.
+            </p>
+            <div class="field-row">
+              <div class="field">
+                <label for="annotation-time">Recording time (seconds)</label>
+                <input type="number" id="annotation-time" min="0" step="0.1" value="0">
+              </div>
+              <div class="field">
+                <label for="annotation-kind">Type</label>
+                <select id="annotation-kind">
+                  <option value="comment">Comment</option>
+                  <option value="question">Question</option>
+                </select>
+              </div>
+              <div class="field" style="align-self:end">
+                <button type="button" class="btn btn-small btn-quiet" id="annotation-use-playhead">
+                  Use current playhead
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="annotation-text">Comment or question</label>
+              <textarea id="annotation-text" maxlength="4000" rows="2"></textarea>
+            </div>
+            <div class="row">
+              <label class="field grow" for="annotation-author">
+                <span>Author (optional)</span>
+                <input type="text" id="annotation-author" maxlength="200">
+              </label>
+              <button type="button" class="btn btn-small btn-primary" id="annotation-add">
+                Add note
+              </button>
+            </div>
+            <p class="small muted" id="annotations-empty" hidden>No annotations yet.</p>
+            <ol class="review-items" id="annotations-list"></ol>
+          </section>
+        </div>
+      </details>
+
+      <details class="settings-group" id="tool-help">
+        <summary>Help: shortcuts and highlight legend</summary>
+        <div class="settings-body">
+          <p class="ribbon-hint">
+            Click or focus the waveform and use the arrow keys to seek. Click a
+            word to replay it with the selected pre/post-roll. Hold the pointer
+            over a word to see how many other times it appears. Double-click a
+            word to find and replace it everywhere.
+            <kbd>Space</kbd> play/pause &middot;
+            <kbd>&larr;</kbd><kbd>&rarr;</kbd> 2s &middot;
+            <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> 5s &middot;
+            <kbd>R</kbd> replay segment &middot; <kbd>L</kbd> loop segment &middot;
+            <kbd>+</kbd>/<kbd>−</kbd> zoom &middot; <kbd>Home</kbd>/<kbd>End</kbd> start/end &middot;
+            <kbd>Esc</kbd> leave the text field
+          </p>
+          <div class="legend">
+            {% if show_confidence %}
+            <span><span class="swatch" style="background:#fdf0d8;box-shadow:inset 0 -2px 0 #e6b455"></span>
+              low model confidence (below {{ (low_confidence * 100) | int }}%)</span>
+            {% endif %}
+            <span><span class="swatch" style="background:var(--accent-soft)"></span> currently playing</span>
+            <span><span class="swatch" style="background:var(--warn-soft)"></span> edited, needs re-timestamping</span>
+            {% if proofreading.available and proofreading.language_supported %}
+            <span><span class="swatch swatch-spell"></span> not in dictionary</span>
+            <span><span class="swatch swatch-artefact"></span> likely transcription slip</span>
+            {% endif %}
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <section class="card validation-panel" id="validation-panel"
+             data-status="{{ workflow.status }}">
+      <h3>Validation sign-off</h3>
+      <p class="small muted">Status: <strong id="workflow-status">{{ workflow.label }}</strong></p>
+      <p class="small muted" id="export-provenance">
+        {% if workflow.export.exported_at %}
+          Latest export: {{ workflow.export.status }} · {{ workflow.export.exported_at }}
+          {% if workflow.export.formats %}· {{ workflow.export.formats|join(', ') }}{% endif %}
+        {% else %}
+          No export recorded yet.
+        {% endif %}
+      </p>
+      <p class="notice notice-warn small" id="validation-lock"
+         {% if workflow.status not in ('validated', 'exported') %}hidden{% endif %}>
+        Transcript changes are locked after sign-off. Reopen validation deliberately
+        before editing, re-timestamping, or restoring a revision.
+      </p>
+      {% if workflow.validated_at %}
+      <p class="small" id="validation-signoff">
+        Validated by {{ workflow.reviewer }} · {{ workflow.validated_at }}
+        {% if workflow.notes %}<br>{{ workflow.notes }}{% endif %}
+      </p>
+      {% else %}
+      <p class="small muted" id="validation-signoff">No validation sign-off recorded.</p>
+      {% endif %}
+      <label class="field">
+        <span>Reviewer</span>
+        <input type="text" id="validation-reviewer" maxlength="200"
+               value="{{ workflow.reviewer }}">
+      </label>
+      <label class="field">
+        <span>Notes / reason for reopening</span>
+        <textarea id="validation-notes" rows="3" maxlength="4000">{{ workflow.notes }}</textarea>
+      </label>
+      <div class="row">
+        <button type="button" class="btn btn-small" id="review-start"
+                {% if workflow.status != 'transcribed' %}hidden{% endif %}>Begin review</button>
+        <button type="button" class="btn btn-small btn-primary" id="validation-sign"
+                {% if workflow.status != 'in_review' %}hidden{% endif %}>Validate transcript</button>
+        <button type="button" class="btn btn-small btn-quiet" id="validation-reopen"
+                {% if workflow.status not in ('validated', 'exported') %}hidden{% endif %}>Reopen validation</button>
+      </div>
+      <details class="validation-history">
+        <summary>Validation and export history ({{ workflow.history|length }})</summary>
+        <ol id="validation-history">
+          {% for event in workflow.history|reverse %}
+          <li><strong>{{ event.action|replace('_', ' ')|title }}</strong>
+            · {{ event.reviewer or 'Reviewer not recorded' }} · {{ event.at }}
+            {% if event.notes %}<br>{{ event.notes }}{% endif %}
+            {% if event.formats %}<br>Formats: {{ event.formats|join(', ') }}{% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </details>
+    </section>
+
+    <section class="card" id="offline-handoff">
+      <h3>Offline review handoff</h3>
+      <p class="small muted">
+        Export a portable package for one transcript, then import the returned
+        package here. Nothing synchronizes in real time.
+      </p>
+      <label class="chk">
+        <input type="checkbox" id="handoff-include-media">
+        Include original source media
+      </label>
+      <div class="field">
+        <label for="handoff-instructions">Instructions for the reviewer (optional)</label>
+        <textarea id="handoff-instructions" rows="3" maxlength="20000"></textarea>
+      </div>
+      <div class="row">
+        <button type="button" class="btn btn-small btn-primary" id="handoff-export">
+          Export review package
+        </button>
+        <button type="button" class="btn btn-small" id="handoff-import">
+          Import returned package
+        </button>
+        <input type="file" id="handoff-file" accept=".lsreview,.zip" hidden>
+      </div>
+      <p class="small muted" id="handoff-status" role="status" aria-live="polite"></p>
+      <div id="handoff-conflicts"></div>
+    </section>
+
     <div class="card">
       <h3>Finish the review</h3>
       <p class="small muted">
@@ -206,7 +521,7 @@
     </div>
 
     <div class="card">
-      <h3>Download transcripts</h3>
+      <h3>Download {{ 'English translation' if is_translation else 'transcripts' }}</h3>
       <p class="small muted">
         Files are written into this document's <code>outputs</code> folder and
         regenerated whenever you re-timestamp or re-export.
@@ -245,7 +560,14 @@
     <div class="card">
       <h3>Document facts</h3>
       <dl id="facts">
-        <dt>Status</dt><dd>{{ document.status }}</dd>
+        <dt>Status</dt>
+        <dd id="fact-status">
+          {%- if document.status == 'transcribed' and info -%}
+            {{ status_labels[info.output_status] if info.operation == 'translate' else 'Transcribed' }}
+          {%- else -%}
+            {{ document.status }}
+          {%- endif -%}
+        </dd>
         <dt>Source</dt><dd class="small">{{ document.media.container if document.media else '-' }}</dd>
         {% if document.media and document.media.has_video %}
         <dt>Video</dt><dd class="small">{{ document.media.video_codec }}
@@ -259,6 +581,28 @@
           {% endif %}
         </dd>
         <dt>Model</dt><dd class="small">{{ info.model if info }}</dd>
+        {% if info %}
+        <dt>Operation</dt>
+        <dd class="small" id="fact-operation">
+          {{ 'Translate to English' if info.operation == 'translate' else 'Transcribe' }}<br>
+          {{ status_labels[info.output_status] }}
+        </dd>
+        {% endif %}
+        {% if info and info.language %}
+        <dt>Spoken language</dt>
+        <dd class="small" id="fact-language">
+          {{ info.language_name }} ({{ info.language }})
+          {% if info.language_requested == 'auto' %}
+            <br>detected automatically, {{ (info.language_probability * 100) | round | int }}% confidence
+          {% elif info.language_requested %}
+            <br>selected before processing
+          {% endif %}
+        </dd>
+        <dt>Text language</dt>
+        <dd class="small" id="fact-output-language">
+          {{ info.output_language_name or 'not recorded' }}{% if info.output_language and info.output_language != 'und' %} ({{ info.output_language }}){% endif %}
+        </dd>
+        {% endif %}
         {% if document.stats %}
         <dt>Processing</dt>
         <dd class="small">
@@ -266,7 +610,9 @@
           {{ document.stats.get('words_per_second', '-') }} words/s
         </dd>
         {% endif %}
+        {% if show_confidence %}
         <dt>Uncertain words</dt><dd id="fact-low">{{ info.low_confidence if info else 0 }}</dd>
+        {% endif %}
         <dt>Reviewed</dt><dd id="fact-reviewed">{{ 'yes' if info and info.human_edited else 'not yet' }}</dd>
       </dl>
     </div>
@@ -276,12 +622,15 @@
       <summary><strong>Edit history</strong> ({{ revisions|length }})</summary>
       <p class="small muted" style="margin-top:.6rem">
         Each autosave keeps the previous version. Restoring replaces the current
-        transcript.
+        {{ noun }}, and the current one is kept here too. An earlier result kept
+        when a recording was redone or translated is marked below and is never
+        removed automatically.
       </p>
       <ul class="file-list">
         {% for r in revisions %}
         <li>
           <span class="small mono">{{ r.id }}</span>
+          {% if r.kept %}<span class="badge">earlier {{ 'English translation' if r.operation == 'translate' else 'transcript' }}</span>{% endif %}
           <span class="size">
             <button type="button" class="btn btn-small btn-quiet"
                     data-restore="{{ r.id }}">Restore</button>
@@ -304,16 +653,27 @@
     id: {{ document.id|tojson }},
     filename: {{ document.filename|tojson }},
     lowConfidence: {{ low_confidence|tojson }},
+    showConfidence: {{ show_confidence|tojson }},
     transcript: {{ transcript|tojson }},
+    workflow: {{ workflow|tojson }},
     speakers: {{ speakers|tojson }},
     palette: {{ palette|tojson }},
     pauseGap: {{ pause_gap|tojson }},
     proofreading: {{ proofreading|tojson }},
+    language: {{ (info.output_language if info else '')|tojson }},
+    noun: {{ noun|tojson }},
+    spaceless: {{ spaceless|tojson }},
   };
 </script>
+<script src="/static/js/playback.js"></script>
 <script src="/static/js/editor.js"></script>
 <script src="/static/js/speakers.js"></script>
 <script src="/static/js/findreplace.js"></script>
 <script src="/static/js/proofread.js"></script>
+<script src="/static/js/review.js"></script>
+<script src="/static/js/deidentification.js"></script>
+<script src="/static/js/handoff.js"></script>
+<script src="/static/js/validation.js"></script>
+<script src="/static/js/tools.js"></script>
 {% endif %}
 {% endblock %}

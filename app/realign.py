@@ -35,6 +35,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
+from . import languages
 from .transcript import _now, make_word, normalise, segment_text
 
 _TOKEN = re.compile(r"\S+")
@@ -50,13 +51,24 @@ def _key(token: str) -> str:
     return _STRIP.sub("", token.lower())
 
 
-def tokenise(text: str) -> list:
+def tokenise(text: str, spaceless: bool = False) -> list:
+    """Split text into the tokens that are aligned against the timed words.
+
+    Space-delimited languages split on whitespace. For scripts written without
+    word spaces that would yield one token for a whole sentence, so the text is
+    split into characters (with Latin runs and trailing punctuation kept
+    together), which is the granularity Whisper times such languages at.
+    """
+    if spaceless:
+        return [u for chunk in (text or "").split() for u in languages.split_units(chunk)]
     return _TOKEN.findall(text or "")
 
 
-def realign_segment(seg: dict, *, fallback_start: float, fallback_end: float) -> dict:
+def realign_segment(
+    seg: dict, *, fallback_start: float, fallback_end: float, spaceless: bool = False
+) -> dict:
     """Return realignment stats for one segment, rebuilding its word list."""
-    new_tokens = tokenise(segment_text(seg))
+    new_tokens = tokenise(segment_text(seg), spaceless)
     old_words = list(seg.get("words") or [])
 
     stats = {
@@ -86,6 +98,21 @@ def realign_segment(seg: dict, *, fallback_start: float, fallback_end: float) ->
         seg["end"] = seg["words"][-1]["end"]
         seg.pop("stale_timings", None)
         return stats
+
+    if spaceless:
+        # Whisper times these scripts in units that can span several
+        # characters, while the edited text is tokenised per character. If the
+        # text is unchanged there is nothing to repair: keep the model's own
+        # words, timings and confidences untouched.
+        original = "".join(w.get("w", "") for w in old_words)
+        if original == "".join(segment_text(seg).split()):
+            seg.pop("stale_timings", None)
+            stats["preserved"] = len(old_words)
+            return stats
+        # Otherwise split multi-character words into the same units as the new
+        # text so unchanged characters still match. Timing inside a split word
+        # is interpolated by length; its outer boundaries are exact.
+        old_words = _split_words(old_words)
 
     old_keys = [_key(w.get("w", "")) for w in old_words]
     new_keys = [_key(t) for t in new_tokens]
@@ -146,6 +173,25 @@ def realign_segment(seg: dict, *, fallback_start: float, fallback_end: float) ->
     return stats
 
 
+def _split_words(words: list) -> list:
+    """Split timed words into tokenise()'s units, dividing each span by length."""
+    out: list = []
+    for word in words:
+        units = languages.split_units(word.get("w", ""))
+        if len(units) <= 1:
+            out.append(word)
+            continue
+        start, end = float(word["start"]), float(word["end"])
+        total = float(sum(len(u) for u in units))
+        cursor = start
+        for unit in units:
+            unit_end = cursor + (end - start) * len(unit) / total
+            out.append(make_word(unit, cursor, unit_end, word.get("prob", 1.0)))
+            cursor = unit_end
+        out[-1]["end"] = round(end, 3)
+    return out
+
+
 def _span(old_words: list, i1: int, i2: int, rebuilt: list, fallback_end: float):
     """Time span the replaced original words occupied."""
     start = float(old_words[i1]["start"])
@@ -189,6 +235,7 @@ def retimestamp(doc: dict) -> dict:
     """
     segments = doc.get("segments") or []
     duration = float(doc.get("duration") or 0.0)
+    spaceless = languages.doc_is_spaceless(doc)
 
     totals = {
         "segments": len(segments),
@@ -214,6 +261,7 @@ def retimestamp(doc: dict) -> dict:
             seg,
             fallback_start=max(previous_end, float(seg.get("start") or previous_end)),
             fallback_end=max(next_start, previous_end + 0.2),
+            spaceless=spaceless,
         )
 
         after = [(w.get("w"), w.get("start"), w.get("end")) for w in (seg.get("words") or [])]

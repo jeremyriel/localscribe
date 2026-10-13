@@ -223,7 +223,7 @@
     const value = replaceInput ? replaceInput.value : '';
     if (!confirm(
       `Replace all ${matches.length} occurrences of "${input.value}" with ` +
-      `"${value}"?\n\nThe current transcript is snapshotted first, so this can ` +
+      `"${value}"?\n\nThe current ${window.DOC.noun || 'transcript'} is snapshotted first, so this can ` +
       `be undone from the edit history. Word timings will need re-timestamping ` +
       `afterwards.`
     )) return;

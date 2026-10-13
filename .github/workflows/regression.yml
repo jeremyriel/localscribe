@@ -1,0 +1,64 @@
+name: Regression tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "tests/**"
+      - "docs/**"
+      - "packaging/**"
+      - "README.md"
+      - "requirements.txt"
+      - "requirements-dev.txt"
+      - ".github/workflows/regression.yml"
+      - ".github/workflows/build-installers.yml"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime and test dependencies
+        run: python3 -m pip install -r requirements-dev.txt
+      - name: Run Python regression suites
+        run: |
+          for test in \
+            test_accessibility \
+            test_assets \
+            test_box_sync \
+            test_deidentification \
+            test_engine_fallback \
+            test_engine_mlx_normalization \
+            test_exporters \
+            test_handoff \
+            test_health \
+            test_languages \
+            test_operations \
+            test_privacy_center \
+            test_project_archives \
+            test_project_operations \
+            test_proofread \
+            test_range_media \
+            test_realign \
+            test_recovery \
+            test_review \
+            test_sensitivity \
+            test_settings_navigation \
+            test_speakers \
+            test_update_check \
+            test_validation \
+            test_vocabulary \
+            test_winlibs \
+            test_workflow_e2e
+          do
+            python3 -m "tests.${test}"
+          done
+      - name: Run browser playback logic tests
+        run: |
+          node tests/test_playback.js
+          node tests/test_history_filter.js

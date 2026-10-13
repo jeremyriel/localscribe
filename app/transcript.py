@@ -13,11 +13,14 @@ Shape
       "schema": 3,
       "created": "...", "updated": "...",
       "language": "en", "language_probability": 0.99,
+      "language_requested": "auto",   # what the user asked for: "auto" or a code
       "duration": 3612.4,
       "model": "large-v3-turbo",
       "engine": {...},          # settings actually used, for reproducibility
       "stats": {...},           # throughput measured during transcription
       "human_edited": false,
+      "validation": {...},      # local sign-off and append-only workflow history
+      "export": {...},          # latest export status, formats, and source fingerprint
       "speakers": [             # the roster; see "Speakers" below
         {"id": "s1", "name": "Interviewer", "short": "INT", "color": "#0f766e"}
       ],
@@ -53,7 +56,10 @@ existing tagging is preserved.
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timezone
+
+from . import languages
 
 SCHEMA_VERSION = 3
 
@@ -97,7 +103,10 @@ def new_document(
     model: str,
     language: str = "",
     language_probability: float = 0.0,
+    language_requested: str = "",
     engine: dict | None = None,
+    operation: str = "",
+    output_check: dict | None = None,
 ) -> dict:
     return {
         "schema": SCHEMA_VERSION,
@@ -105,14 +114,35 @@ def new_document(
         "updated": _now(),
         "language": language,
         "language_probability": round(float(language_probability or 0.0), 4),
+        "language_requested": language_requested,
+        # The operation asked for: "transcribe" or "translate". Absent on
+        # transcripts made before it was recorded (see languages.operation_of).
+        "operation": operation,
+        # What the text looked like when it was produced; only meaningful for
+        # "translate", where the request alone does not prove a translation.
+        "output_check": output_check or {},
         "duration": round(float(duration or 0.0), 3),
         "model": model,
         "engine": engine or {},
         "stats": {},
         "human_edited": False,
         "retimestamped_at": None,
+        "validation": {
+            "status": "transcribed",
+            "reviewer": "",
+            "validated_at": None,
+            "notes": "",
+            "history": [],
+        },
+        "export": {
+            "status": "not_exported",
+            "exported_at": None,
+            "formats": [],
+            "source_sha256": "",
+        },
         "speakers": [],
         "dictionary": [],
+        "annotations": [],
         "segments": [],
     }
 
@@ -152,6 +182,15 @@ def make_segment(
         "no_speech_prob": meta.get("no_speech_prob"),
         "compression_ratio": meta.get("compression_ratio"),
         "temperature": meta.get("temperature"),
+        "review": (
+            {
+                "flagged": bool(meta["review"].get("flagged")),
+                "changed": bool(meta["review"].get("changed")),
+                "resolved": [],
+            }
+            if isinstance(meta.get("review"), dict)
+            else {"flagged": False, "changed": False, "resolved": []}
+        ),
     }
     return seg
 
@@ -214,6 +253,17 @@ def full_text(doc: dict) -> str:
 def word_count(doc: dict) -> int:
     # Counted from text, not from the word list, so the number stays correct
     # after a human edit adds or removes words but before a re-timestamp.
+    if languages.doc_is_spaceless(doc):
+        # No spaces to split on: counting whitespace-separated tokens would
+        # report a whole sentence of Chinese as one "word". Count characters
+        # and numbers instead, which is the conventional length measure for
+        # these scripts. Punctuation and spacing are not counted.
+        return sum(
+            1
+            for seg in doc.get("segments", [])
+            for ch in segment_text(seg)
+            if unicodedata.category(ch)[0] in ("L", "N")
+        )
     return sum(
         len(_WORD_SPLIT.findall(segment_text(seg)))
         for seg in doc.get("segments", [])
@@ -268,10 +318,23 @@ def summary(doc: dict) -> dict:
         "words": word_count(doc),
         "duration": doc.get("duration") or 0.0,
         "language": doc.get("language") or "",
+        "language_name": languages.name(doc.get("language")),
+        "language_probability": float(doc.get("language_probability") or 0.0),
+        # "" for projects transcribed before the language could be chosen.
+        "language_requested": doc.get("language_requested") or "",
+        "output_language": languages.output_language(doc),
+        "output_language_name": languages.name(languages.output_language(doc)),
+        "operation": languages.operation_of(doc),
+        "output_status": languages.output_status(doc),
+        "spaceless": languages.doc_is_spaceless(doc),
+        "rtl": languages.doc_is_rtl(doc),
         "model": doc.get("model") or "",
         "human_edited": bool(doc.get("human_edited")),
         "retimestamped_at": doc.get("retimestamped_at"),
-        "low_confidence": low_confidence_count(doc),
+        "confidence_meaningful": languages.confidence_is_meaningful(doc),
+        "low_confidence": (
+            low_confidence_count(doc) if languages.confidence_is_meaningful(doc) else 0
+        ),
         "speakers": speakers(doc),
         "edited_segments": sum(1 for s in segs if s.get("edited")),
     }
@@ -389,6 +452,7 @@ def set_roster(doc: dict, roster) -> dict:
             previous = speaker_by_id(doc, current)
             lost[current] = (previous or {}).get("name", current)
             seg["speaker_id"] = ""
+            _clear_review_resolutions(seg)
             orphaned += 1
 
     doc["speakers"] = cleaned
@@ -430,6 +494,7 @@ def assign_speaker(doc: dict, segment_ids, speaker_id: str) -> int:
             continue
         if (seg.get("speaker_id") or "") != (speaker_id or ""):
             seg["speaker_id"] = speaker_id or ""
+            _clear_review_resolutions(seg)
             changed += 1
 
     if changed:
@@ -585,6 +650,8 @@ def normalise(doc: dict) -> dict:
 
     doc.setdefault("speakers", [])
     doc.setdefault("dictionary", [])
+    if not isinstance(doc.get("annotations"), list):
+        doc["annotations"] = []
     migrate_speakers(doc)
 
     segments.sort(key=lambda s: (float(s.get("start") or 0.0), float(s.get("end") or 0.0)))
@@ -639,6 +706,23 @@ def normalise(doc: dict) -> dict:
         if not (seg.get("text") or "").strip():
             seg["text"] = " ".join(w["w"] for w in cleaned).strip()
         seg["speaker"] = (seg.get("speaker") or "").strip()
+        review = seg.get("review")
+        legacy_review = not isinstance(review, dict)
+        if not isinstance(review, dict):
+            review = {}
+        resolved = review.get("resolved")
+        if not isinstance(resolved, list):
+            resolved = []
+        seg["review"] = {
+            "flagged": bool(review.get("flagged")),
+            "changed": bool(review.get("changed"))
+            or (legacy_review and bool(seg.get("stale_timings"))),
+            "resolved": sorted({
+                str(category) for category in resolved
+                if isinstance(category, str)
+                and category in {"low_confidence", "artifact", "unassigned", "changed"}
+            }),
+        }
 
     if duration and previous_end > duration:
         doc["duration"] = round(previous_end, 3)
@@ -653,6 +737,14 @@ def normalise(doc: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Edit application
 # ---------------------------------------------------------------------------
+
+def _clear_review_resolutions(seg: dict) -> None:
+    state = seg.get("review")
+    if not isinstance(state, dict):
+        state = {}
+        seg["review"] = state
+    state["resolved"] = []
+    state["changed"] = True
 
 
 def apply_edits(doc: dict, edits: list) -> dict:
@@ -682,6 +774,7 @@ def apply_edits(doc: dict, edits: list) -> dict:
                 wanted = ""
             if wanted != (seg.get("speaker_id") or ""):
                 seg["speaker_id"] = wanted
+                _clear_review_resolutions(seg)
                 touched += 1
 
         elif "speaker" in edit:
@@ -693,6 +786,7 @@ def apply_edits(doc: dict, edits: list) -> dict:
             if not name:
                 if seg.get("speaker_id"):
                     seg["speaker_id"] = ""
+                    _clear_review_resolutions(seg)
                     touched += 1
             else:
                 match = next(
@@ -704,6 +798,7 @@ def apply_edits(doc: dict, edits: list) -> dict:
                     doc.setdefault("speakers", []).append(match)
                 if seg.get("speaker_id") != match["id"]:
                     seg["speaker_id"] = match["id"]
+                    _clear_review_resolutions(seg)
                     touched += 1
 
         if "text" in edit:
@@ -711,6 +806,7 @@ def apply_edits(doc: dict, edits: list) -> dict:
             if new_text != segment_text(seg):
                 seg["text"] = new_text
                 seg["edited"] = True
+                _clear_review_resolutions(seg)
                 if new_text:
                     seg["stale_timings"] = True
                 else:
@@ -743,6 +839,10 @@ def split_segment(doc: dict, seg_id: int, word_index: int) -> dict:
             speaker=seg.get("speaker", ""), edited=True,
             avg_logprob=seg.get("avg_logprob"),
             no_speech_prob=seg.get("no_speech_prob"),
+            review={
+                "flagged": bool((seg.get("review") or {}).get("flagged")),
+                "changed": True,
+            },
         )
         second = make_segment(
             seg["id"] + 1, tail[0]["start"], tail[-1]["end"],
@@ -778,6 +878,11 @@ def merge_segment(doc: dict, seg_id: int) -> dict:
             edited=True,
             avg_logprob=seg.get("avg_logprob"),
             no_speech_prob=seg.get("no_speech_prob"),
+            review={
+                "flagged": bool((seg.get("review") or {}).get("flagged"))
+                or bool((nxt.get("review") or {}).get("flagged")),
+                "changed": True,
+            },
         )
         segments[position:position + 2] = [merged]
         doc["human_edited"] = True

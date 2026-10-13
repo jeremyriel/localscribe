@@ -14,6 +14,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -117,14 +118,63 @@ def test_segments_from_result_offsets_timestamps():
 def test_ensure_weight_filename_aliases_a_single_oddly_named_file():
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "config.json").write_text("{}")
-        (Path(tmp) / "model.safetensors").write_bytes(b"fake weights")
+        real = Path(tmp) / "model.safetensors"
+        real.write_bytes(b"fake weights")
         M._ensure_weight_filename(tmp)
         alias = Path(tmp) / "weights.safetensors"
         check("alias created", alias.exists())
-        check(
-            "alias points at the real weight file",
-            alias.resolve().name == "model.safetensors",
-        )
+        # Symlinks are used where permitted (macOS/Linux); Windows without
+        # Developer Mode or admin rights raises WinError 1314 and gets a copy.
+        # Either way the loader must read the real weight file's bytes, and a
+        # symlink must also target it.
+        if alias.is_symlink():
+            points_at_real = alias.resolve() == real.resolve()
+        else:
+            points_at_real = alias.is_file() and alias.read_bytes() == real.read_bytes()
+        check("alias points at the real weight file", points_at_real)
+
+
+def test_ensure_weight_filename_falls_back_to_a_copy_without_symlinks():
+    with tempfile.TemporaryDirectory() as tmp:
+        real = Path(tmp) / "model.safetensors"
+        real.write_bytes(b"fake weights")
+        denied = OSError(1314, "A required privilege is not held by the client")
+        with patch.object(M.os, "symlink", side_effect=denied):
+            M._ensure_weight_filename(tmp)
+        alias = Path(tmp) / "weights.safetensors"
+        check("a copy is made when symlinks are not permitted",
+              alias.is_file() and not alias.is_symlink())
+        check("the copy has the real file's exact bytes",
+              alias.read_bytes() == b"fake weights")
+        check("the original weight file is untouched",
+              real.read_bytes() == b"fake weights")
+
+
+def test_ensure_weight_filename_prefers_a_symlink_to_the_real_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "model.safetensors").write_bytes(b"fake weights")
+        with patch.object(M.os, "symlink") as symlink:
+            M._ensure_weight_filename(tmp)
+        check("the alias is requested as a relative link to the real file",
+              symlink.call_args is not None
+              and symlink.call_args.args == ("model.safetensors", Path(tmp) / "weights.safetensors"))
+
+
+def test_ensure_weight_filename_handles_npz_and_total_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "model.npz").write_bytes(b"npz bytes")
+        with patch.object(M.os, "symlink", side_effect=OSError("denied")):
+            M._ensure_weight_filename(tmp)
+        check("an .npz weight file is aliased to weights.npz with the same bytes",
+              (Path(tmp) / "weights.npz").read_bytes() == b"npz bytes")
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "model.safetensors").write_bytes(b"fake weights")
+        with patch.object(M.os, "symlink", side_effect=OSError("denied")), patch(
+            "shutil.copyfile", side_effect=OSError("disk full")
+        ):
+            M._ensure_weight_filename(tmp)
+        check("if neither a link nor a copy is possible nothing is created and nothing raises",
+              not (Path(tmp) / "weights.safetensors").exists())
 
 
 def test_ensure_weight_filename_is_a_noop_when_expected_name_present():
@@ -354,6 +404,9 @@ def main() -> int:
         test_translate_params_keeps_known_keys_drops_unknown,
         test_segments_from_result_offsets_timestamps,
         test_ensure_weight_filename_aliases_a_single_oddly_named_file,
+        test_ensure_weight_filename_falls_back_to_a_copy_without_symlinks,
+        test_ensure_weight_filename_prefers_a_symlink_to_the_real_file,
+        test_ensure_weight_filename_handles_npz_and_total_failure,
         test_ensure_weight_filename_is_a_noop_when_expected_name_present,
         test_ensure_weight_filename_is_a_noop_when_ambiguous,
         test_engine_segment_interoperates_with_transcript_schema,
