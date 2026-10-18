@@ -1,0 +1,73 @@
+{
+  "format": "localscribe-project",
+  "format_version": 2,
+  "app_version": "1.01.2",
+  "exported": "2026-01-02T03:04:05+00:00",
+  "slug": "synthetic-regression-study-2",
+  "project_id": "synthetic-project-id",
+  "title": "Synthetic regression study (imported)",
+  "includes_media": true,
+  "data_sensitivity": "no_phi",
+  "documents": [
+    {
+      "id": "fixture-document",
+      "filename": "synthetic-interview.wav",
+      "status": "transcribed"
+    }
+  ],
+  "transcription_provenance": [
+    {
+      "document_id": "fixture-document",
+      "engine": {
+        "name": "synthetic-fixture"
+      },
+      "provenance": {},
+      "media": {},
+      "stats": {
+        "segments": 2
+      }
+    }
+  ],
+  "files": [
+    {
+      "path": "documents/fixture-document/document.json",
+      "size_bytes": 857,
+      "sha256": "50598fe26154a2fe31af1a0341745f6f56c5be9e94c318fc342695335f7bba46"
+    },
+    {
+      "path": "documents/fixture-document/outputs/synthetic-interview.docx",
+      "size_bytes": 37306,
+      "sha256": "19bfc2c41d81ad7c655212a649047a157745ca5f3a9b7d98c563eac702330549"
+    },
+    {
+      "path": "documents/fixture-document/outputs/synthetic-interview.json",
+      "size_bytes": 5043,
+      "sha256": "0a9d013f73fd07619db5bd952fe680c89b05cc3a50472799eadc0105820adc77"
+    },
+    {
+      "path": "documents/fixture-document/outputs/synthetic-interview.srt",
+      "size_bytes": 121,
+      "sha256": "7965bc1e911071b7431e76d138dfba7b8defaedd0d93b90fbedb412d22b6aa40"
+    },
+    {
+      "path": "documents/fixture-document/outputs/synthetic-interview.vtt",
+      "size_bytes": 371,
+      "sha256": "e13b0ee53f3a40c5ed8dcffafd85edbc514c2d124faef37b85aa3ffa282acb1e"
+    },
+    {
+      "path": "documents/fixture-document/transcript.json",
+      "size_bytes": 3357,
+      "sha256": "8953f61392b64dfdcef8449d32988c9353fa630d795dbd749e3dfda88ec4d1e4"
+    },
+    {
+      "path": "media/fixture-document__synthetic-interview.wav",
+      "size_bytes": 23,
+      "sha256": "322c4e201fab5f3d6824ad826d4af6569fd198c267b4d0a7a075c4114a2b9371"
+    },
+    {
+      "path": "project.json",
+      "size_bytes": 675,
+      "sha256": "4316f1953ce802b9db299ca172e1915eeae285cd57d09bad75d9b277934e225d"
+    }
+  ]
+}

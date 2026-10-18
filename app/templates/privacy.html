@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Activity &amp; Diagnostics - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="grow">
+    <h1>Activity &amp; Diagnostics</h1>
+    <p class="lede">
+      What Local Scribe has done that could use the internet or change your data,
+      and tools for troubleshooting. Nothing here is uploaded automatically.
+    </p>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <section class="card">
+    <h2>Offline Lock</h2>
+    {% if values.offline_lock %}
+      <p><span class="badge badge-ok">On</span> Outbound network access is blocked.</p>
+    {% else %}
+      <p><span class="badge badge-warn">Off</span> Model downloads and update checks may use the network.</p>
+    {% endif %}
+    <p class="small muted">
+      Offline Lock is enforced at the socket level. A deliberate Box Sync
+      backup also requires the lock to be off.
+    </p>
+    <a class="btn btn-small" href="/settings#privacy-settings">Manage privacy settings</a>
+  </section>
+
+  <section class="card">
+    <h2>Backup folders</h2>
+    {% if backup_summary.with_folder %}
+      <p><span class="badge badge-ok">{{ backup_summary.with_folder }} of {{ backup_summary.total }}</span>
+        {{ 'project has' if backup_summary.with_folder == 1 else 'projects have' }} a backup folder</p>
+    {% else %}
+      <p><span class="badge">None set</span></p>
+    {% endif %}
+    <p class="small muted">
+      Each project has its own backup folder, chosen on its project page, and a
+      backup only runs when you start it. Local Scribe verifies the copy it
+      writes; it cannot see whether Box has uploaded it or whether a folder is
+      approved for your data.
+    </p>
+    <a class="btn btn-small" href="/">Go to Projects</a>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Last online action</h2>
+  {% set online = activities|selectattr('type', 'equalto', 'network')|list %}
+  {% if online %}
+    <p>
+      <strong>{{ online[0].summary }}</strong>
+      <span class="badge {{ 'badge-ok' if online[0].status == 'success' else ('badge-err' if online[0].status == 'failed' else '') }}">{{ online[0].status_label }}</span>
+    </p>
+    <p class="small muted">{{ online[0].day }} at {{ online[0].time }}</p>
+  {% else %}
+    <p class="muted">Nothing recorded yet that could have used the internet.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="activity-history">
+  <h2>Activity history</h2>
+  <p class="small muted">
+    A short log of things that can use the internet (<strong>Online</strong>:
+    update checks, model downloads, Box Sync backups) and things that protect or
+    remove your data (<strong>Data safety</strong>: snapshots, backups,
+    deletions, restores). The latest 200 events are kept on this computer only.
+    Only the kind of action is saved, never titles, file names, transcript text,
+    or paths; project names shown here are looked up when this page opens.
+  </p>
+  {% if activities %}
+  <div class="row" style="margin:.6rem 0">
+    <fieldset class="history-filter">
+      <legend>Show</legend>
+      <label class="chk"><input type="radio" name="history-type" value="all" checked> All ({{ activity_counts.all }})</label>
+      <label class="chk"><input type="radio" name="history-type" value="network"> Online ({{ activity_counts.network }})</label>
+      <label class="chk"><input type="radio" name="history-type" value="recovery"> Data safety ({{ activity_counts.recovery }})</label>
+    </fieldset>
+    <span class="spacer"></span>
+    <label class="chk"><input type="checkbox" id="history-technical"> Show technical details</label>
+  </div>
+  <p class="small" id="history-status" role="status" aria-live="polite">Showing all {{ activity_counts.all }} events.</p>
+  <div class="table-wrap">
+    <table id="history-table">
+      <thead><tr><th>Time</th><th>What happened</th><th>Result</th></tr></thead>
+      {% set shown = namespace(day=none) %}
+      <tbody>
+        {% for row in activities %}
+          {% if row.day != shown.day %}
+            {% set shown.day = row.day %}
+            <tr class="history-day" data-day="{{ row.day }}"><th colspan="3" scope="colgroup">{{ row.day }}</th></tr>
+          {% endif %}
+          <tr class="history-row" data-groups="{{ row.groups }}" data-day="{{ row.day }}">
+            <td class="small nowrap">{{ row.time }}</td>
+            <td>
+              {{ row.summary }}
+              {% if row.project %}<span class="muted"> &middot; {{ row.project }}</span>{% endif %}
+              <div class="small muted history-technical" hidden>{{ row.type_label }} &middot; {{ row.detail }} &middot; {{ row.timestamp }}{% if row.ref %} &middot; project reference {{ row.ref }}{% endif %}</div>
+            </td>
+            <td>
+              <span class="badge {{ 'badge-ok' if row.status == 'success' else ('badge-err' if row.status == 'failed' else ('badge-warn' if row.status == 'cancelled' else '')) }}">{{ row.status_label }}</span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted" id="history-empty" hidden
+     data-empty-network="No online activity is recorded. Update checks, model downloads and Box Sync backups appear here when they happen."
+     data-empty-recovery="No snapshots, backups, restores or deletions are recorded yet. They appear here when they happen."></p>
+  {% else %}
+  <p class="muted">No activity recorded yet. Update checks, model downloads, backups, snapshots and deletions will appear here.</p>
+  {% endif %}
+</section>
+
+<details class="card disclosure" id="storage-locations">
+  <summary><h2 style="display:inline">Storage locations</h2></summary>
+  <p class="small muted">
+    Project data, downloaded models, logs, and settings remain in these local
+    locations. Paths are shown here for your reference; they are not included
+    in the sanitized diagnostics preview.
+  </p>
+  <dl>
+    <dt>Projects</dt><dd class="mono small" style="overflow-wrap:anywhere">{{ storage_paths.projects }}</dd>
+    <dt>Models</dt><dd class="mono small" style="overflow-wrap:anywhere">{{ storage_paths.models }}</dd>
+    <dt>Logs</dt><dd class="mono small" style="overflow-wrap:anywhere">{{ storage_paths.logs }}</dd>
+    <dt>Settings</dt><dd class="mono small" style="overflow-wrap:anywhere">{{ storage_paths.settings }}</dd>
+  </dl>
+</details>
+
+<details class="card disclosure" id="diagnostics">
+  <summary><h2 style="display:inline">Troubleshooting</h2></summary>
+  <p>
+    If you are asked for diagnostics, generate a sanitized report here. The
+    preview contains only app and runtime versions, privacy-setting states, and
+    basic engine status. It excludes recordings, media, transcript content,
+    tokens, project metadata, and user paths. Nothing is saved or sent
+    automatically.
+  </p>
+  <div class="row" style="margin:.8rem 0">
+    <button type="button" class="btn" id="preview-diagnostics">Generate preview</button>
+    <span id="diagnostics-status" class="small muted" role="status" aria-live="polite"></span>
+  </div>
+  <label for="diagnostics-preview">Inspect the diagnostics JSON before saving</label>
+  <textarea id="diagnostics-preview" class="mono" rows="14" readonly
+            spellcheck="false" placeholder="Generate a preview to inspect its contents."></textarea>
+  <label class="chk" style="margin:.7rem 0">
+    <input type="checkbox" id="diagnostics-inspected" disabled>
+    <span>I inspected this preview and want to save it to my computer.</span>
+  </label>
+  <button type="button" class="btn btn-primary" id="save-diagnostics" disabled>
+    Save diagnostics JSON
+  </button>
+</details>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.ACTIVITY_LABELS = {{ activity_labels|tojson }};
+</script>
+<script src="/static/js/history.js"></script>
+<script src="/static/js/privacy.js"></script>
+{% endblock %}

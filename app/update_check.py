@@ -19,6 +19,7 @@ import threading
 import urllib.error
 import urllib.request
 
+from . import activity
 from .config import PATHS, SETTINGS, app_version
 from .console import CONSOLE
 
@@ -106,6 +107,7 @@ def refresh_state() -> dict:
 
     CONSOLE.step("Checking GitHub for a newer version of Local Scribe",
                  repo=GITHUB_REPO)
+    activity.record("update_check", outcome="started")
 
     latest = None
     download_url = None
@@ -131,6 +133,7 @@ def refresh_state() -> dict:
                        "(no release published yet, or the request failed)")
         with _lock:
             _STATE.update(checked=False, available=False, current=current)
+        activity.record("update_check", outcome="failed")
         return state()
 
     available = _is_newer(latest, current)
@@ -146,6 +149,7 @@ def refresh_state() -> dict:
                      current=current, latest=latest)
     else:
         CONSOLE.info(f"Local Scribe is up to date ({current}).")
+    activity.record("update_check", outcome="completed")
     return state()
 
 

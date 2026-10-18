@@ -102,14 +102,14 @@
       </p>
     </div>
     <div>
-      <h3>One deliberate network request, then sealed</h3>
+      <h3>Deliberate network actions</h3>
       <p class="small">
-        Whisper's model weights have to come from somewhere, so AI Settings has
-        an explicit download action for them. That is the only outbound request
-        the application makes. Once the model is on disk, engaging the
-        <strong>offline lock</strong> blocks all non-loopback network access
-        inside this process at the socket level, so it cannot reach the network
-        even by mistake.
+        Network access is limited to explicit model downloads, optional GPU
+        support installation, update checks, and a user-started source update.
+        Once setup is complete, engaging the <strong>offline lock</strong>
+        blocks all non-loopback network access inside this process at the socket
+        level. The Activity &amp; Diagnostics shows the current lock and recent network
+        actions.
       </p>
       <p class="small">
         Offline lock is currently
@@ -117,9 +117,10 @@
           <span class="badge badge-ok">engaged</span>.
         {% else %}
           <span class="badge badge-warn">off</span>.
-          <a href="/settings">Engage it in AI Settings</a> once your models are
+          <a href="/settings">Engage it in Settings</a> once your models are
           downloaded.
         {% endif %}
+        <a href="/privacy">Review privacy status</a>.
       </p>
     </div>
     <div>

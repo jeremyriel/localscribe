@@ -30,14 +30,22 @@
   const followToggle = document.getElementById('follow-play');
   const playerCard = document.querySelector('.player-card');
   const findbarEl = document.getElementById('findbar');
+  const preRoll = document.getElementById('pre-roll');
+  const postRoll = document.getElementById('post-roll');
+  const zoomLabel = document.getElementById('zoom-level');
 
   let transcript = D.transcript;
+  // "transcript" or "translation", from what is stored on this document.
+  const NOUN = D.noun || 'transcript';
+  const NOUN_CAP = NOUN.charAt(0).toUpperCase() + NOUN.slice(1);
   let roster = (D.speakers || []).slice();
   let duration = Number(transcript.duration) || 0;
   let peaks = [];
   let activeSegment = -1;
   let editingSegment = -1;
   let loopRange = null;        // {start, end} while looping a segment
+  let stopAt = null;
+  let zoom = 1;
   const pendingEdits = new Map();   // segment id -> {text?, speaker?}
 
   /* ------------------------------------------------------------ rendering */
@@ -62,13 +70,39 @@
       // edit that just changed it.
       return LS.escapeHtml(seg.text || '');
     }
-    return w.map((word, index) =>
-      `<span class="w${(word.prob !== undefined && word.prob < D.lowConfidence) ? ' low' : ''}"` +
+    // Confidence is not shown for machine-translated text (see
+    // confidence_is_meaningful() in app/languages.py); the stored values are kept.
+    const showProb = D.showConfidence !== false;
+    const spans = w.map((word, index) =>
+      `<span class="w${(showProb && word.prob !== undefined && word.prob < D.lowConfidence) ? ' low' : ''}"` +
       ` data-start="${word.start}" data-end="${word.end}" data-wi="${index}"` +
       ` data-prob="${word.prob !== undefined ? word.prob : ''}"` +
-      ` title="${word.prob !== undefined ? Math.round(word.prob * 100) + '% confidence' : ''} - click to hear">` +
+      ` title="${showProb && word.prob !== undefined ? Math.round(word.prob * 100) + '% confidence - ' : ''}click to hear">` +
       `${LS.escapeHtml(word.w)}</span>`
-    ).join(' ');
+    );
+    if (!D.spaceless) return spans.join(' ');
+
+    /* Chinese, Japanese, Thai and similar are written without word spaces and
+       Whisper times them in small units, so a space between every span would
+       put one between every character. The only record of where the original
+       text did have a space (around embedded Latin words, between phrases) is
+       the segment text, so spacing is read from there. Mirrors word_gaps() in
+       app/languages.py. */
+    const tokens = w.map((word) => word.w || '');
+    const text = seg.text || '';
+    let position = 0;
+    return spans.map((html, index) => {
+      const token = tokens[index];
+      const found = token ? text.indexOf(token, position) : -1;
+      let gap;
+      if (found >= 0 && !text.slice(position, found).trim()) {
+        gap = index > 0 && found > position;
+        position = found + token.length;
+      } else {
+        gap = index > 0 && /[A-Za-z0-9]$/.test(tokens[index - 1]) && /^[A-Za-z0-9]/.test(token);
+      }
+      return (gap ? ' ' : '') + html;
+    }).join('');
   }
 
   /* Turns, mirroring app/transcript.py:turns().
@@ -137,6 +171,7 @@
     return `<div class="turn-head">
         ${name}
         <button type="button" class="seg-stamp" data-play="${turn.segments[0].start}"
+                data-end="${turn.segments[turn.segments.length - 1].end}"
                 title="Play this turn from the start">${stamp(turn.segments[0].start)}</button>
         ${chipsHtml(turn)}
       </div>`;
@@ -152,22 +187,27 @@
     const classes = ['seg'];
     if (seg.edited) classes.push('edited');
     if (seg.stale_timings) classes.push('stale');
+    const flagged = Boolean(seg.review && seg.review.flagged);
 
     return `${marker}
       <div class="${classes.join(' ')}" data-id="${seg.id}">
         <div class="seg-time">
-          <button type="button" class="seg-stamp" data-play="${seg.start}"
+          <button type="button" class="seg-stamp" data-play="${seg.start}" data-end="${seg.end}"
                   title="Play from ${stamp(seg.start)}">${stamp(seg.start)}</button>
           <span class="seg-dur">${length.toFixed(1)}s</span>
           <div class="seg-tools">
             <button type="button" data-act="loop" title="Loop this segment">loop</button>
+            <button type="button" data-act="replay" title="Replay this segment with pre/post-roll">replay</button>
             <button type="button" data-act="merge" title="Merge with the next segment">merge</button>
+            <button type="button" data-act="flag" aria-pressed="${flagged}"
+                    title="${flagged ? 'Remove review flag' : 'Flag this segment for review'}">${flagged ? 'flagged' : 'flag'}</button>
           </div>
         </div>
         <div class="seg-body">
-          <div class="seg-text" contenteditable="true" spellcheck="false"
+          <div class="seg-text" contenteditable="true" spellcheck="false" dir="auto"
+               ${D.language ? `lang="${LS.escapeHtml(D.language)}"` : ''}
                role="textbox" aria-multiline="true"
-               aria-label="Transcript text at ${stamp(seg.start)}">${segmentHtml(seg)}</div>
+               aria-label="${NOUN_CAP} text at ${stamp(seg.start)}">${segmentHtml(seg)}</div>
         </div>
       </div>`;
   }
@@ -260,6 +300,14 @@
   }, 1400);
 
   function queueEdit(id, change) {
+    const seg = segmentById(id);
+    if (seg && (Object.prototype.hasOwnProperty.call(change, 'text')
+        || Object.prototype.hasOwnProperty.call(change, 'speaker')
+        || Object.prototype.hasOwnProperty.call(change, 'speaker_id'))) {
+      if (!seg.review) seg.review = { flagged: false, changed: false, resolved: [] };
+      seg.review.resolved = [];
+      seg.review.changed = true;
+    }
     pendingEdits.set(Number(id), { ...(pendingEdits.get(Number(id)) || {}), ...change });
     setSaveState('Unsaved changes', 'dirty');
     flush();
@@ -281,7 +329,7 @@
   host.addEventListener('click', (event) => {
     const stampBtn = event.target.closest('[data-play]');
     if (stampBtn) {
-      playFrom(Number(stampBtn.dataset.play));
+      playRange(Number(stampBtn.dataset.play), Number(stampBtn.dataset.end));
       return;
     }
 
@@ -297,7 +345,9 @@
       const segEl = tool.closest('.seg');
       const id = Number(segEl.dataset.id);
       if (tool.dataset.act === 'loop') toggleLoop(id);
+      if (tool.dataset.act === 'replay') playSegment(id);
       if (tool.dataset.act === 'merge') mergeSegment(id);
+      if (tool.dataset.act === 'flag' && window.LSReview) window.LSReview.toggleFlag(id);
       return;
     }
 
@@ -307,7 +357,7 @@
     if (word) {
       const segEl = word.closest('.seg');
       if (Number(segEl.dataset.id) === editingSegment) return;
-      playFrom(Number(word.dataset.start));
+      playRange(Number(word.dataset.start), Number(word.dataset.end));
       markPlayingWord(word);
 
       // event.detail is the click count: 2 here means this is the second
@@ -407,8 +457,8 @@
           : '') +
       `<div class="word-card-row">${
         others > 0
-          ? `<strong>${others}</strong> other ${others === 1 ? 'occurrence' : 'occurrences'} in this transcript`
-          : 'Appears only here in this transcript'
+          ? `<strong>${others}</strong> other ${others === 1 ? 'occurrence' : 'occurrences'} in this ${NOUN}`
+          : `Appears only here in this ${NOUN}`
       }</div>` +
       `<div class="word-card-hint">Double-click the word to find &amp; replace it everywhere.</div>`;
     document.body.appendChild(wordCard);
@@ -555,6 +605,9 @@
       seg.speaker_id = speakerId || '';
       const speaker = speakerById(seg.speaker_id);
       seg.speaker = speaker ? speaker.name : '';
+      if (!seg.review) seg.review = { flagged: false, changed: false, resolved: [] };
+      seg.review.resolved = [];
+      seg.review.changed = true;
     });
     render();
 
@@ -586,7 +639,7 @@
 
   document.addEventListener('keydown', (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.target.matches('input, textarea, [contenteditable="true"]')) return;
+    if (event.target.closest('input, textarea, select, button, summary, [contenteditable="true"]')) return;
     if (!/^[1-9]$/.test(event.key)) return;
 
     const speaker = roster[Number(event.key) - 1];
@@ -601,11 +654,45 @@
 
   /* -------------------------------------------------------------- playback */
 
+  function mediaDuration() {
+    return Math.max(0, Number(duration) || Number(audio && audio.duration) || 0);
+  }
+
+  function seekTo(seconds) {
+    if (!audio) return 0;
+    audio.currentTime = LSPlayback.seekTarget(seconds, mediaDuration());
+    return audio.currentTime;
+  }
+
   function playFrom(seconds) {
     if (!audio) return;
-    audio.currentTime = Math.max(0, Math.min(seconds, duration || audio.duration || 0));
+    stopAt = null;
+    seekTo(seconds);
     const promise = audio.play();
     if (promise && promise.catch) promise.catch(() => { /* autoplay refusal */ });
+  }
+
+  function playRange(start, end) {
+    if (!audio) return;
+    const pre = Number(preRoll && preRoll.value) || 0;
+    const post = Number(postRoll && postRoll.value) || 0;
+    const rangeEnd = Number(end);
+    const range = LSPlayback.rangeWithRoll(start, rangeEnd, pre, post, mediaDuration());
+    stopAt = range.end;
+    seekTo(range.start);
+    const promise = audio.play();
+    if (promise && promise.catch) promise.catch(() => { /* autoplay refusal */ });
+  }
+
+  function playSegment(id) {
+    const seg = segmentById(id);
+    if (seg) playRange(seg.start, seg.end);
+  }
+
+  function replayActiveSegment() {
+    const seg = segmentById(activeSegment);
+    if (seg) playSegment(seg.id);
+    else LS.toast('Play or select a transcript segment first.', 'info', 2200);
   }
 
   function toggleLoop(id) {
@@ -614,10 +701,12 @@
     if (loopRange && loopRange.id === id) {
       loopRange = null;
       if (loopToggle) loopToggle.checked = false;
+      stopAt = null;
       LS.toast('Loop off.', 'info', 2200);
       return;
     }
     loopRange = { id, start: seg.start, end: seg.end };
+    stopAt = null;
     if (loopToggle) loopToggle.checked = true;
     playFrom(seg.start);
     LS.toast(`Looping ${stamp(seg.start)} to ${stamp(seg.end)}.`, 'info', 2600);
@@ -639,6 +728,12 @@
         audio.currentTime = loopRange.start;
         return;
       }
+      if (stopAt !== null && t >= stopAt) {
+        audio.pause();
+        seekTo(stopAt);
+        stopAt = null;
+        return;
+      }
 
       if (timeReadout) {
         timeReadout.textContent =
@@ -651,26 +746,37 @@
 
     audio.addEventListener('loadedmetadata', () => {
       if (!duration || !Number.isFinite(duration)) duration = audio.duration;
+      if (ribbon) ribbon.setAttribute('aria-valuemax', String(mediaDuration()));
       drawRibbon(0);
     });
+    audio.addEventListener('seeked', () => drawRibbon(audio.currentTime));
+    audio.addEventListener('ended', () => { stopAt = null; });
 
     audio.addEventListener('error', () => {
       LS.toast(
         'The audio could not be loaded. If this is an unusual format, the ' +
-        'browser-playable preview may be missing; re-transcribing the file ' +
+        'browser-playable preview may be missing; processing the file again ' +
         'regenerates it.', 'error', 14000);
     });
 
     const playBtn = document.getElementById('btn-play');
     if (playBtn) {
       playBtn.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()));
-      audio.addEventListener('play', () => { playBtn.textContent = 'Pause'; });
-      audio.addEventListener('pause', () => { playBtn.textContent = 'Play'; });
+      audio.addEventListener('play', () => {
+        playBtn.textContent = 'Pause';
+        playBtn.setAttribute('aria-label', 'Pause audio');
+      });
+      audio.addEventListener('pause', () => {
+        playBtn.textContent = 'Play';
+        playBtn.setAttribute('aria-label', 'Play audio');
+      });
     }
     const back = document.getElementById('btn-back');
     const fwd = document.getElementById('btn-fwd');
-    if (back) back.addEventListener('click', () => { audio.currentTime -= 2; });
-    if (fwd) fwd.addEventListener('click', () => { audio.currentTime += 2; });
+    if (back) back.addEventListener('click', () => seekTo(audio.currentTime - 2));
+    if (fwd) fwd.addEventListener('click', () => seekTo(audio.currentTime + 2));
+    const replay = document.getElementById('btn-replay');
+    if (replay) replay.addEventListener('click', replayActiveSegment);
 
     const rate = document.getElementById('rate');
     if (rate) rate.addEventListener('change', () => { audio.playbackRate = Number(rate.value); });
@@ -735,6 +841,21 @@
     drawRibbon(0);
   }
 
+  function visibleWindow(position) {
+    const total = mediaDuration() || 1;
+    const span = total / zoom;
+    const center = Number(position) || 0;
+    const start = Math.max(0, Math.min(total - span, center - span / 2));
+    return { start, end: start + span, span };
+  }
+
+  function setZoom(next) {
+    zoom = Math.max(1, Math.min(8, next));
+    if (zoomLabel) zoomLabel.textContent = zoom === 1 ? 'Full recording' : `${zoom}×`;
+    const position = audio ? audio.currentTime : 0;
+    drawRibbon(position);
+  }
+
   function drawRibbon(position) {
     if (!ribbon) return;
     const ratio = window.devicePixelRatio || 1;
@@ -750,18 +871,23 @@
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    const total = duration || 1;
+    const total = mediaDuration() || 1;
+    const view = visibleWindow(position);
+    const xForTime = (time) => ((time - view.start) / view.span) * width;
     const mid = height / 2;
 
     // Waveform
     if (peaks.length) {
       ctx.fillStyle = '#c7d2d4';
-      const step = width / peaks.length;
-      const barWidth = Math.max(1, step * 0.85);
-      peaks.forEach((peak, index) => {
+      const first = Math.max(0, Math.floor((view.start / total) * peaks.length));
+      const last = Math.min(peaks.length, Math.ceil((view.end / total) * peaks.length));
+      for (let index = first; index < last; index += 1) {
+        const peak = peaks[index];
+        const x = xForTime((index / peaks.length) * total);
+        const step = (total / peaks.length / view.span) * width;
         const h = Math.max(1, peak * (height * 0.82));
-        ctx.fillRect(index * step, mid - h / 2, barWidth, h);
-      });
+        ctx.fillRect(x, mid - h / 2, Math.max(1, step * 0.85), h);
+      }
     } else {
       ctx.fillStyle = '#e7e5da';
       ctx.fillRect(0, mid - 1, width, 2);
@@ -771,7 +897,8 @@
     ctx.strokeStyle = 'rgba(15,118,110,.22)';
     ctx.lineWidth = 1;
     transcript.segments.forEach((seg) => {
-      const x = (seg.start / total) * width;
+      if (seg.start < view.start || seg.start > view.end) return;
+      const x = xForTime(seg.start);
       ctx.beginPath();
       ctx.moveTo(x, 4);
       ctx.lineTo(x, height - 4);
@@ -781,41 +908,55 @@
     // Active segment shading
     const active = segmentById(activeSegment);
     if (active) {
-      const x1 = (active.start / total) * width;
-      const x2 = (active.end / total) * width;
-      ctx.fillStyle = 'rgba(15,118,110,.13)';
-      ctx.fillRect(x1, 0, Math.max(2, x2 - x1), height);
+      const x1 = xForTime(Math.max(view.start, active.start));
+      const x2 = xForTime(Math.min(view.end, active.end));
+      if (x2 > x1) {
+        ctx.fillStyle = 'rgba(15,118,110,.13)';
+        ctx.fillRect(x1, 0, Math.max(2, x2 - x1), height);
+      }
     }
 
     // Loop region
     if (loopRange) {
-      const x1 = (loopRange.start / total) * width;
-      const x2 = (loopRange.end / total) * width;
+      const x1 = xForTime(Math.max(view.start, loopRange.start));
+      const x2 = xForTime(Math.min(view.end, loopRange.end));
       ctx.strokeStyle = 'rgba(154,91,0,.75)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(x1, 2, Math.max(3, x2 - x1), height - 4);
+      if (x2 > x1) ctx.strokeRect(x1, 2, Math.max(3, x2 - x1), height - 4);
     }
 
     // Playhead
-    const x = (Math.max(0, position) / total) * width;
+    const x = xForTime(Math.max(view.start, Math.min(view.end, Number(position) || 0)));
     ctx.strokeStyle = '#a32020';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, height);
     ctx.stroke();
+    ribbon.setAttribute('aria-valuemax', String(total));
+    ribbon.setAttribute('aria-valuenow', String(Math.max(0, Math.min(total, Number(position) || 0))));
+    ribbon.setAttribute('aria-valuetext', `${LS.clock(position, false)} of ${LS.clock(total, false)}`);
   }
 
   if (ribbon) {
     ribbon.addEventListener('click', (event) => {
       const box = ribbon.getBoundingClientRect();
-      const fraction = (event.clientX - box.left) / box.width;
-      playFrom(fraction * (duration || 0));
+      if (!box.width) return;
+      ribbon.focus();
+      const fraction = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+      const view = visibleWindow(audio ? audio.currentTime : 0);
+      playFrom(LSPlayback.timeAtFraction(fraction, view.start, view.span));
     });
     window.addEventListener('resize', LS.debounce(() => {
       drawRibbon(audio ? audio.currentTime : 0);
     }, 120));
   }
+  const zoomOut = document.getElementById('zoom-out');
+  const zoomIn = document.getElementById('zoom-in');
+  const zoomFit = document.getElementById('zoom-fit');
+  if (zoomOut) zoomOut.addEventListener('click', () => setZoom(zoom / 2));
+  if (zoomIn) zoomIn.addEventListener('click', () => setZoom(zoom * 2));
+  if (zoomFit) zoomFit.addEventListener('click', () => setZoom(1));
 
   /* Keeps the find bar (which is `position: sticky`, see app.css) pinned
      just below the player card rather than under the very top of the
@@ -826,8 +967,10 @@
   function updateFindbarOffset() {
     if (!playerCard || !findbarEl) return;
     const topbar = document.querySelector('.topbar');
-    const topbarHeight = topbar ? topbar.offsetHeight : 58;
-    findbarEl.style.setProperty('--findbar-top', `${topbarHeight + playerCard.offsetHeight + 8}px`);
+    const stuck = (el) => Boolean(el) && getComputedStyle(el).position === 'sticky';
+    const offset = (stuck(topbar) ? topbar.offsetHeight : 0)
+      + (stuck(playerCard) ? playerCard.offsetHeight : 0) + 8;
+    document.documentElement.style.setProperty('--findbar-top', `${offset}px`);
   }
   if (playerCard && findbarEl) {
     updateFindbarOffset();
@@ -837,8 +980,8 @@
   /* ------------------------------------------------------------- shortcuts */
 
   document.addEventListener('keydown', (event) => {
-    const typing = event.target.matches('input, textarea, [contenteditable="true"]');
-    if (typing) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target.closest('input, textarea, select, button, summary, [contenteditable="true"]')) return;
     if (!audio) return;
 
     if (event.code === 'Space') {
@@ -846,10 +989,29 @@
       if (audio.paused) audio.play(); else audio.pause();
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      audio.currentTime -= event.shiftKey ? 5 : 2;
+      seekTo(audio.currentTime - (event.shiftKey ? 5 : 2));
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      audio.currentTime += event.shiftKey ? 5 : 2;
+      seekTo(audio.currentTime + (event.shiftKey ? 5 : 2));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      playFrom(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      playFrom(mediaDuration());
+    } else if (event.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      replayActiveSegment();
+    } else if (event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      const seg = segmentById(activeSegment);
+      if (seg) toggleLoop(seg.id);
+    } else if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      setZoom(zoom * 2);
+    } else if (event.key === '-' || event.key === '_') {
+      event.preventDefault();
+      setZoom(zoom / 2);
     }
   });
 
@@ -861,7 +1023,7 @@
     jumpLow.addEventListener('click', () => {
       const spans = [...document.querySelectorAll('.w.low')];
       if (!spans.length) {
-        LS.toast('No low-confidence words in this transcript.', 'info');
+        LS.toast(`No low-confidence words in this ${NOUN}.`, 'info');
         return;
       }
       lowIndex = (lowIndex + 1) % spans.length;
@@ -917,6 +1079,9 @@
         transcript = result.transcript;
         render();
         refreshOutputs(result.outputs);
+        if (result.workflow) {
+          document.dispatchEvent(new CustomEvent('ls:workflow', { detail: result.workflow }));
+        }
 
         const report = result.report;
         LS.toast(
@@ -977,10 +1142,13 @@
       try {
         const result = await LS.post(`${api}/export`);
         refreshOutputs(result.outputs);
+        if (result.workflow) {
+          document.dispatchEvent(new CustomEvent('ls:workflow', { detail: result.workflow }));
+        }
         // The files themselves are fresh again even though word timings may
         // still be stale (that is a separate, still-true warning above).
         if (outputsStale) outputsStale.hidden = true;
-        LS.toast('Output files rewritten from the current transcript.', 'ok');
+        LS.toast(`Output files rewritten from the current ${NOUN}.`, 'ok');
       } catch (err) {
         LS.toast(err.message, 'error');
       } finally {
@@ -992,14 +1160,16 @@
   document.querySelectorAll('[data-restore]').forEach((button) => {
     button.addEventListener('click', async () => {
       if (!confirm(
-        'Restore this earlier version?\n\nThe current transcript is saved as a ' +
-        'new revision first, so this can be undone.'
+        'Restore this earlier version?\n\nThe current ' + NOUN + ' is kept in the edit ' +
+        'history first, so this can be undone. If the earlier version is a ' +
+        'different kind of result (for example the original-language transcript ' +
+        'instead of an English translation), the page reloads to show it correctly.'
       )) return;
       try {
-        const result = await LS.post(`${api}/revisions/${button.dataset.restore}/restore`);
-        transcript = result.transcript;
-        render();
-        LS.toast('Earlier version restored.', 'ok');
+        await LS.post(`${api}/revisions/${button.dataset.restore}/restore`);
+        // The restored version may be the other kind of result, which changes
+        // headings, labels, notices and file names, so show the page afresh.
+        location.reload();
       } catch (err) {
         LS.toast(err.message, 'error');
       }
@@ -1044,6 +1214,9 @@
     setSaveState,
     refreshOutputs,
     playFrom,
+    currentTime: () => audio ? audio.currentTime : 0,
+    annotations: () => transcript.annotations || [],
+    setAnnotations(value) { transcript.annotations = value || []; },
   };
 
   render();

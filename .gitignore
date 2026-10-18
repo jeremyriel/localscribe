@@ -4,6 +4,9 @@
 # control.
 projects/
 *.lsproj
+*.lsreview
+# This deterministic, synthetic compatibility fixture contains no user data.
+!tests/fixtures/project-v1.lsproj
 
 # Application logs contain transcript text as it is produced, so they are
 # inside the same protected-data boundary.

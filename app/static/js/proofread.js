@@ -19,6 +19,9 @@
   const D = window.DOC;
   if (!D || !window.LSEditor) return;
   if (!D.proofreading || !D.proofreading.available) return;
+  // The checks are English-only: for any other transcript language they would
+  // underline almost every word. The page explains this in a notice instead.
+  if (D.proofreading.language_supported === false) return;
   if (!D.proofreading.spelling && !D.proofreading.artefacts) return;
 
   const supportsHighlights = typeof CSS !== 'undefined' && 'highlights' in CSS;
@@ -68,6 +71,9 @@
         // more, and seg.text no longer changes while typing (see above).
         const sent = wanted.find((w) => w.id === id);
         checked.set(id, sent ? sent.text : '');
+        document.dispatchEvent(new CustomEvent('ls:proofread', {
+          detail: { segmentId: id, text: sent ? sent.text : '', issues: list },
+        }));
       });
       paint();
       updateCount();
@@ -155,7 +161,7 @@
     if (jumpBtn) {
       jumpBtn.title = total
         ? `${total} flagged word${total === 1 ? '' : 's'}. Click to step through them.`
-        : 'Nothing flagged in the part of the transcript checked so far.';
+        : `Nothing flagged in the part of the ${D.noun || 'transcript'} checked so far.`;
     }
   }
 
@@ -204,6 +210,7 @@
       }
     } finally {
       sweeping = false;
+      document.dispatchEvent(new CustomEvent('ls:proofread-complete'));
     }
   }
   const debouncedSweep = LS.debounce(sweepAll, 600);
@@ -371,7 +378,7 @@
     jumpBtn.addEventListener('click', () => {
       const all = allIssues();
       if (!all.length) {
-        LS.toast('Nothing flagged in the transcript checked so far.', 'info');
+        LS.toast(`Nothing flagged in the ${D.noun || 'transcript'} checked so far.`, 'info');
         return;
       }
       cursor = (cursor + 1) % all.length;

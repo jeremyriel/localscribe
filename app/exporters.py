@@ -16,6 +16,7 @@ import json
 import re
 from pathlib import Path
 
+from . import languages
 from .transcript import (
     DEFAULT_PAUSE_GAP,
     LOW_CONFIDENCE,
@@ -87,6 +88,98 @@ def speaker_legend(doc: dict) -> list:
     return [(s.get("name", ""), s.get("short", "")) for s in speaker_roster(doc)]
 
 
+def provenance_rows(meta: dict) -> list:
+    provenance = meta.get("export_provenance") or {}
+    rows = []
+    if provenance.get("status"):
+        rows.append(("Export status", str(provenance["status"]).replace("_", " ").title()))
+    if provenance.get("workflow_status"):
+        rows.append((
+            "Workflow status",
+            str(provenance["workflow_status"]).replace("_", " ").title(),
+        ))
+    if provenance.get("reviewer"):
+        rows.append(("Validated by", str(provenance["reviewer"])))
+    if provenance.get("validated_at"):
+        rows.append(("Validated at", str(provenance["validated_at"])))
+    if provenance.get("exported_at"):
+        rows.append(("Exported at", str(provenance["exported_at"])))
+    if provenance.get("formats"):
+        rows.append(("Export formats", ", ".join(provenance["formats"])))
+    return [
+        (label, str(value).replace("\r", " ").replace("\n", " "))
+        for label, value in rows
+    ]
+
+def language_description(info: dict) -> str:
+    """Human-readable language line: name, code, and how it was determined.
+
+    A research record should say whether the language was chosen by the person
+    running the transcription or inferred by the model, since a wrong
+    detection on a short or noisy recording is a known failure mode.
+    """
+    code = info.get("language") or ""
+    if not code:
+        return ""
+    text = languages.label(code)
+    requested = info.get("language_requested") or ""
+    if requested == languages.AUTO:
+        probability = float(info.get("language_probability") or 0.0)
+        text += f", detected automatically ({probability * 100:.0f}% confidence)"
+    elif requested:
+        text += ", selected by the user"
+    status = info.get("output_status") or "original"
+    if status == "translated":
+        text += "; English machine translation (the text was checked and appears to be English)"
+    elif status == "english_source":
+        text += "; Translate to English was requested, and the speech is already English"
+    elif status == "untranslated":
+        text += (
+            f"; Translate to English was requested, but the text is still in "
+            f"{languages.name(code)}. This is NOT an English translation"
+        )
+    elif status == "unverified":
+        text += "; Translate to English was requested, but English output could not be confirmed"
+    return text
+
+
+def operation_description(info: dict) -> str:
+    """What was asked of Whisper, and what the stored text turned out to be."""
+    if info.get("operation") == languages.TRANSLATE:
+        return "Translate to English (Whisper translate task; a machine translation, not a record of what was said)"
+    return "Transcription (text in the language spoken)"
+
+
+def heading_label(info: dict) -> str:
+    """Heading for the body of an export."""
+    if (info.get("output_status") or "original") in ("translated", "english_source"):
+        return "English translation"
+    return "Transcript"
+
+
+def basename_for(doc: dict) -> str:
+    """File stem for a document's exports.
+
+    A confirmed English translation is written as ``translation-en`` so it can
+    never be mistaken for, or overwrite, an original-language ``transcript``.
+    Text that was requested as a translation but is not confirmed English keeps
+    the plain name: the file name must not claim a translation the text does
+    not show.
+    """
+    if languages.output_status(doc) in ("translated", "english_source"):
+        return "translation-en"
+    return "transcript"
+
+
+def length_label(info: dict) -> str:
+    """Unit for the transcript length figure.
+
+    Scripts written without spaces between words have no word count to report,
+    so the figure is a count of characters and must be labelled as one.
+    """
+    return "Characters" if info.get("spaceless") else "Words"
+
+
 # ---------------------------------------------------------------------------
 # Timestamp formatting
 # ---------------------------------------------------------------------------
@@ -136,6 +229,7 @@ def build_cues(
     """
     max_chars = max(10, int(max_chars))
     max_lines = max(1, int(max_lines))
+    spaceless = languages.doc_is_spaceless(doc)
     cues: list = []
 
     for seg in doc.get("segments", []):
@@ -162,45 +256,72 @@ def build_cues(
         # can serve both writers.
         reserve = max(len(f"<v {speaker}>"), len(f"{speaker}: ")) if speaker else 0
 
-        current: list = []
-        for word in words:
-            token = word.get("w", "")
-            if not token:
-                continue
-            prospective = " ".join([w["w"] for w in current] + [token])
-            duration = float(word["end"]) - float(current[0]["start"]) if current else 0.0
+        # Where the original text had a space between two words. Only needed
+        # for scripts written without word spaces, where it is the sole record
+        # of spaces around embedded Latin words and between phrases.
+        words = [w for w in words if w.get("w")]
+        gaps = (
+            languages.word_gaps(segment_text(seg), [w["w"] for w in words])
+            if spaceless else None
+        )
 
-            too_long = not fits(prospective, max_chars, max_lines, reserve)
+        current: list = []       # indices into `words`
+        for index, word in enumerate(words):
+            chosen = current + [index]
+            prospective = languages.join_tokens(
+                [words[i]["w"] for i in chosen], spaceless,
+                [gaps[i] for i in chosen] if gaps else None,
+            )
+            duration = (
+                float(word["end"]) - float(words[current[0]]["start"]) if current else 0.0
+            )
+
+            too_long = not fits(prospective, max_chars, max_lines, reserve, spaceless)
             too_slow = duration > float(max_duration)
             if current and (too_long or too_slow):
-                cues.append(_cue(current, speaker))
+                cues.append(_cue(words, current, gaps, speaker, spaceless))
                 current = []
-            current.append(word)
+            current.append(index)
 
         if current:
-            cues.append(_cue(current, speaker))
+            cues.append(_cue(words, current, gaps, speaker, spaceless))
 
     return cues
 
 
-def _cue(words: list, speaker: str) -> dict:
+def _cue(words: list, indices: list, gaps, speaker: str, spaceless: bool = False) -> dict:
+    chosen = [words[i] for i in indices]
     return {
-        "start": float(words[0]["start"]),
-        "end": float(words[-1]["end"]),
+        "start": float(chosen[0]["start"]),
+        "end": float(chosen[-1]["end"]),
         "speaker": speaker,
-        "text": " ".join(w["w"] for w in words).strip(),
+        "text": languages.join_tokens(
+            [w["w"] for w in chosen], spaceless,
+            [gaps[i] for i in indices] if gaps else None,
+        ).strip(),
     }
 
 
-def wrap_lines(text: str, max_chars: int, max_lines: int | None = None) -> list:
-    """Greedy word wrap at ``max_chars``, breaking only between words.
+def wrap_lines(
+    text: str,
+    max_chars: int,
+    max_lines: int | None = None,
+    spaceless: bool = False,
+) -> list:
+    """Greedy wrap at ``max_chars``, breaking only between words.
 
     ``max_lines`` is accepted for call-site clarity but never used to force an
     overlong line: a single word longer than the limit gets its own line rather
     than being split, because splitting a word mid-character is worse than a
     slightly wide caption. ``build_cues`` is responsible for closing a cue
     before it needs more lines than allowed.
+
+    With ``spaceless`` set (Chinese, Japanese, Thai and similar) there are no
+    word spaces to break at, so lines break between characters instead.
+    Latin words embedded in the text are still kept whole.
     """
+    if spaceless:
+        return _wrap_spaceless(text, max_chars)
     lines: list = []
     current = ""
     for word in text.split():
@@ -215,7 +336,30 @@ def wrap_lines(text: str, max_chars: int, max_lines: int | None = None) -> list:
     return lines or [""]
 
 
-def fits(text: str, max_chars: int, max_lines: int, reserve: int = 0) -> bool:
+def _wrap_spaceless(text: str, max_chars: int) -> list:
+    lines: list = []
+    current = ""
+    for chunk in text.split():
+        for index, unit in enumerate(languages.split_units(chunk)):
+            separator = " " if (index == 0 and current) else ""
+            candidate = current + separator + unit
+            if current and len(candidate) > max_chars:
+                lines.append(current)
+                current = unit
+            else:
+                current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def fits(
+    text: str,
+    max_chars: int,
+    max_lines: int,
+    reserve: int = 0,
+    spaceless: bool = False,
+) -> bool:
     """True when text wraps into max_lines lines of at most max_chars.
 
     ``reserve`` accounts for a prefix rendered into the first line, such as a
@@ -226,7 +370,7 @@ def fits(text: str, max_chars: int, max_lines: int, reserve: int = 0) -> bool:
     # The prefix is padded with a non-space filler because wrap_lines splits
     # on whitespace and would otherwise discard leading spaces entirely.
     probe = ("x" * reserve) + text if reserve else text
-    return len(wrap_lines(probe, max_chars)) <= max_lines
+    return len(wrap_lines(probe, max_chars, spaceless=spaceless)) <= max_lines
 
 
 # ---------------------------------------------------------------------------
@@ -266,12 +410,17 @@ def write_vtt(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -
     if title:
         # NOTE comments are valid WebVTT and ignored by players.
         out += [f"NOTE {title}", ""]
+    provenance = provenance_rows(meta or {})
+    if provenance:
+        out.append("NOTE Export provenance")
+        out.extend(f"{label}: {value}" for label, value in provenance)
+        out.append("")
 
     for index, cue in enumerate(cues, start=1):
         body = cue["text"]
         if cue["speaker"]:
             body = f"<v {cue['speaker']}>{body}"
-        lines = wrap_lines(body, max_chars, max_lines)
+        lines = wrap_lines(body, max_chars, max_lines, languages.doc_is_spaceless(doc))
         out.append(str(index))
         out.append(f"{vtt_time(cue['start'])} --> {vtt_time(cue['end'])}")
         out.extend(lines)
@@ -299,7 +448,9 @@ def write_srt(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -
             body = f"{cue['speaker']}: {body}"
         out.append(str(index))
         out.append(f"{srt_time(cue['start'])} --> {srt_time(cue['end'])}")
-        out.extend(wrap_lines(body, max_chars, max_lines))
+        out.extend(wrap_lines(
+            body, max_chars, max_lines, languages.doc_is_spaceless(doc)
+        ))
         out.append("")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -348,15 +499,19 @@ def write_txt(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -
 
 def _plain_header(doc: dict, meta: dict) -> list:
     info = summary(doc)
+    validated = (
+        (meta.get("export_provenance") or {}).get("workflow_status") == "validated"
+    )
     rows = []
     if meta.get("project"):
         rows.append(f"Project: {meta['project']}")
     if meta.get("filename"):
         rows.append(f"Source file: {meta['filename']}")
     rows.append(f"Duration: {stamp(info['duration'])}")
-    rows.append(f"Words: {info['words']}   Segments: {info['segments']}")
+    rows.append(f"Operation: {operation_description(info)}")
+    rows.append(f"{length_label(info)}: {info['words']}   Segments: {info['segments']}")
     if info["language"]:
-        rows.append(f"Language: {info['language']}")
+        rows.append(f"Language: {language_description(info)}")
     rows.append(f"Model: {info['model']} (OpenAI Whisper, run locally)")
     legend = speaker_legend(doc)
     if legend:
@@ -368,11 +523,15 @@ def _plain_header(doc: dict, meta: dict) -> list:
     rows.append(
         "Review status: "
         + (
+            "validated" if validated else
             "human-reviewed" if info["human_edited"] else
             "machine output, not yet reviewed"
         )
     )
-    if meta.get("generated"):
+    rows.extend(f"{label}: {value}" for label, value in provenance_rows(meta))
+    if meta.get("generated") and not (
+        (meta.get("export_provenance") or {}).get("exported_at")
+    ):
         rows.append(f"Exported: {meta['generated']}")
     return rows
 
@@ -383,6 +542,9 @@ def write_md(doc: dict, dest: Path, settings: dict, meta: dict | None = None) ->
     include_speakers = bool(settings.get("txt_include_speakers", True))
     meta = meta or {}
     info = summary(doc)
+    validated = (
+        (meta.get("export_provenance") or {}).get("workflow_status") == "validated"
+    )
 
     def esc(value) -> str:
         text = str(value if value is not None else "")
@@ -396,13 +558,32 @@ def write_md(doc: dict, dest: Path, settings: dict, meta: dict | None = None) ->
         lines.append(f'source_file: "{esc(meta["filename"])}"')
     lines.append(f"duration_seconds: {info['duration']}")
     lines.append(f"duration: \"{stamp(info['duration'])}\"")
+    lines.append(f'operation: "{info["operation"]}"')
+    lines.append(f'output_status: "{info["output_status"]}"')
     lines.append(f"words: {info['words']}")
+    if info["spaceless"]:
+        lines.append('length_unit: "characters"')
     lines.append(f"segments: {info['segments']}")
     if info["language"]:
         lines.append(f'language: "{esc(info["language"])}"')
+        lines.append(f'language_name: "{esc(info["language_name"])}"')
+        if info["language_requested"] == languages.AUTO:
+            lines.append('language_source: "detected"')
+            lines.append(f'language_confidence: {info["language_probability"]:.4f}')
+        elif info["language_requested"]:
+            lines.append('language_source: "selected"')
+        if info["output_language"]:
+            lines.append(f'output_language: "{esc(info["output_language"])}"')
+        if info["output_status"] in ("translated", "english_source"):
+            lines.append('translated_to: "en"')
     lines.append(f'model: "{esc(info["model"])}"')
     lines.append("engine: faster-whisper (CTranslate2), executed locally")
-    lines.append(f"human_reviewed: {str(bool(info['human_edited'])).lower()}")
+    lines.append(
+        f"human_reviewed: {str(bool(info['human_edited'] or validated)).lower()}"
+    )
+    for label, value in provenance_rows(meta):
+        key = label.lower().replace(" ", "_")
+        lines.append(f'{key}: "{esc(value)}"')
     if info["retimestamped_at"]:
         lines.append(f'retimestamped_at: "{esc(info["retimestamped_at"])}"')
     legend = speaker_legend(doc)
@@ -421,7 +602,11 @@ def write_md(doc: dict, dest: Path, settings: dict, meta: dict | None = None) ->
             lines.append(f'{key}: "{esc(meta[key])}"')
     if meta.get("generated"):
         lines.append(f'exported: "{esc(meta["generated"])}"')
-    lines.append('processing: "Transcribed offline. No audio or text left this machine."')
+    lines.append(
+        'processing: "'
+        + ("Translated" if info["operation"] == languages.TRANSLATE else "Transcribed")
+        + ' offline. No audio or text left this machine."'
+    )
     lines.append("---")
     lines.append("")
 
@@ -431,7 +616,7 @@ def write_md(doc: dict, dest: Path, settings: dict, meta: dict | None = None) ->
         lines.append(f"_{meta['description']}_")
         lines.append("")
 
-    lines.append("## Transcript")
+    lines.append(f"## {heading_label(info)}")
     lines.append("")
 
     for turn in rendered_turns(doc, settings):
@@ -466,6 +651,19 @@ def write_json(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     return dest
 
 
+def _mark_right_to_left(paragraph) -> None:
+    """Make a Word paragraph right-to-left (Arabic, Hebrew and similar).
+
+    Without this Word keeps the letters in the right order but aligns the
+    paragraph to the left and lays the speaker label out on the wrong side.
+    """
+    from docx.oxml import OxmlElement
+
+    paragraph._p.get_or_add_pPr().append(OxmlElement("w:bidi"))
+    for run in paragraph.runs:
+        run._r.get_or_add_rPr().append(OxmlElement("w:rtl"))
+
+
 def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -> Path:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -476,6 +674,9 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     include_speakers = bool(settings.get("txt_include_speakers", True))
     meta = meta or {}
     info = summary(doc)
+    validated = (
+        (meta.get("export_provenance") or {}).get("workflow_status") == "validated"
+    )
 
     document = Document()
 
@@ -488,7 +689,10 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     subtitle = document.add_paragraph()
-    run = subtitle.add_run("Transcribed locally with OpenAI Whisper - no data left this machine")
+    run = subtitle.add_run(
+        ("Translated to English" if info["operation"] == languages.TRANSLATE else "Transcribed")
+        + " locally with OpenAI Whisper - no data left this machine"
+    )
     run.italic = True
     run.font.size = Pt(9)
     run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
@@ -498,13 +702,16 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
         ("Source file", meta.get("filename", "")),
         ("Project", meta.get("project", "")),
         ("Duration", stamp(info["duration"])),
-        ("Words", str(info["words"])),
+        ("Operation", operation_description(info)),
+        (length_label(info), str(info["words"])),
         ("Segments", str(info["segments"])),
-        ("Language", info["language"] or "not recorded"),
+        ("Language", language_description(info) or "not recorded"),
         ("Model", info["model"]),
-        ("Review status", "Human-reviewed" if info["human_edited"]
+        ("Review status", "Validated" if validated else
+         "Human-reviewed" if info["human_edited"]
          else "Machine output, not yet reviewed"),
     ]
+    rows.extend(provenance_rows(meta))
     for key in ("principal_investigator", "irb_protocol", "participant_id"):
         if meta.get(key):
             rows.append((key.replace("_", " ").title(), str(meta[key])))
@@ -515,7 +722,9 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
         )))
     elif info["speakers"]:
         rows.append(("Speakers", ", ".join(info["speakers"])))
-    if meta.get("generated"):
+    if meta.get("generated") and not (
+        (meta.get("export_provenance") or {}).get("exported_at")
+    ):
         rows.append(("Exported", str(meta["generated"])))
 
     table = document.add_table(rows=0, cols=2)
@@ -535,7 +744,9 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
                 r.font.size = Pt(9)
 
     document.add_paragraph()
-    document.add_heading("Transcript", level=1)
+    document.add_heading(heading_label(info), level=1)
+
+    rtl = languages.doc_is_rtl(doc)
 
     for turn in rendered_turns(doc, settings):
         for index, block in enumerate(turn["blocks"]):
@@ -560,6 +771,8 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
                 if colour and re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
                     sp_run.font.color.rgb = RGBColor.from_string(colour[1:].upper())
             paragraph.add_run(block["text"])
+            if rtl:
+                _mark_right_to_left(paragraph)
 
     if meta.get("notes"):
         document.add_heading("Project notes", level=1)
@@ -586,12 +799,20 @@ def export_all(
     settings: dict,
     meta: dict | None = None,
     formats=None,
-    basename: str = "transcript",
+    basename: str | None = None,
 ) -> dict:
-    """Write every requested format. Returns {format: path or error string}."""
+    """Write every requested format. Returns {format: path or error string}.
+
+    Unless a ``basename`` is given, the file stem follows the document (see
+    :func:`basename_for`) and the other stem's files are removed, so the
+    outputs folder always describes the transcript that is current. The
+    superseded transcript itself is kept in the document's edit history.
+    """
     wanted = list(formats or settings.get("formats") or ALL_FORMATS)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    automatic = basename is None
+    basename = basename or basename_for(doc)
 
     written: dict = {}
     for fmt in wanted:
@@ -603,6 +824,12 @@ def export_all(
             written[fmt] = str(writer(doc, dest, settings, meta))
         except Exception as exc:
             written[fmt] = f"error: {exc}"
+
+    if automatic and any(not str(v).startswith("error") for v in written.values()):
+        for other in ("transcript", "translation-en"):
+            if other != basename:
+                for fmt in ALL_FORMATS:
+                    (out_dir / f"{other}.{fmt}").unlink(missing_ok=True)
     return written
 
 

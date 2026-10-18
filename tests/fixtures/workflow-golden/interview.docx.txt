@@ -1,0 +1,37 @@
+Synthetic interview
+Transcribed locally with OpenAI Whisper - no data left this machine
+Source file
+synthetic-interview.wav
+Project
+Synthetic regression study (imported)
+Duration
+00:00:03
+Operation
+Transcription (text in the language spoken)
+Words
+7
+Segments
+2
+Language
+Spanish (es)
+Model
+synthetic-fixture
+Review status
+Validated
+Export status
+Current
+Workflow status
+Validated
+Validated by
+Revisor
+Validated at
+2026-01-02T03:04:05+00:00
+Exported at
+2026-01-02T03:04:05+00:00
+Export formats
+docx, json, srt, vtt
+Speakers
+Entrevistadora (E), Participante 01 (P01)
+Transcript
+Entrevistadora: Hola, ¿cómo estás?
+Participante 01: Muy bien, muchas gracias.

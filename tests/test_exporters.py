@@ -5,6 +5,7 @@ Run with:  .venv/Scripts/python.exe -m tests.test_exporters
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tempfile
@@ -208,22 +209,53 @@ def test_segment_without_words_still_captioned():
 def test_exports_reflect_edits():
     doc = build_doc()
     apply_edits(doc, [{"id": 1, "speaker": "Participant 01"}])
+    doc["validation"].update(
+        status="validated", reviewer="Reviewer A",
+        validated_at="2026-10-12T01:00:00+00:00", notes="Checked",
+    )
     settings = default_settings()
     out = Path(tempfile.mkdtemp()) / "outputs"
-    result = export_all(doc, out, settings, {"title": "T", "filename": "a.mp4"})
+    provenance = {
+        "status": "current",
+        "workflow_status": "validated",
+        "reviewer": "Reviewer A",
+        "validated_at": "2026-10-12T01:00:00+00:00",
+        "exported_at": "2026-10-12T02:00:00+00:00",
+        "formats": ["txt", "md", "json"],
+    }
+    result = export_all(doc, out, settings, {
+        "title": "T", "filename": "a.mp4",
+        "export_provenance": provenance,
+    })
 
     txt = Path(result["txt"]).read_text(encoding="utf-8")
     check("txt carries the new speaker label", "Participant 01:" in txt)
+    check("txt carries validation and export provenance",
+          "Export status: Current" in txt
+          and "Workflow status: Validated" in txt
+          and "Validated by: Reviewer A" in txt
+          and "Export formats: txt, md, json" in txt)
     md = Path(result["md"]).read_text(encoding="utf-8")
     check("md front matter lists the speaker with its acronym",
           '- name: "Participant 01"' in md and "short:" in md,
           md[:400])
     check("md declares local processing", "No audio or text left this machine" in md)
+    check("markdown front matter carries validation provenance",
+          'validated_by: "Reviewer A"' in md
+          and 'workflow_status: "Validated"' in md
+          and 'exported_at: "2026-10-12T02:00:00+00:00"' in md)
     vtt = Path(result["vtt"]).read_text(encoding="utf-8")
     # Captions default to the acronym, because a full pseudonym eats the very
     # limited room a caption line has.
     check("vtt carries the speaker voice tag as an acronym",
           "<v P01>" in vtt, vtt[:300])
+    check("VTT comment carries export provenance", "NOTE Export provenance" in vtt
+          and "Validated by: Reviewer A" in vtt)
+    exported_json = json.loads(Path(result["json"]).read_text(encoding="utf-8"))
+    check("JSON preserves provenance metadata and local sign-off",
+          exported_json["meta"]["export_provenance"]["reviewer"] == "Reviewer A"
+          and exported_json["transcript"]["validation"]["status"] == "validated"
+          and exported_json["transcript"]["validation"]["notes"] == "Checked")
 
     full = dict(settings)
     full["caption_speaker_style"] = "name"

@@ -203,6 +203,18 @@ def test_empty_input():
     check("no segments yields nothing", P.check_segments([]) == {})
 
 
+def test_supported_language_boundary():
+    check("English language code is supported", P.supports_language("en"))
+    check("English locale is supported", P.supports_language("en-US"))
+    check("case and underscore are normalized", P.supports_language("EN_us"))
+    check("Spanish is not sent through the English checker",
+          not P.supports_language("es"))
+    check("unknown language is not assumed to be English",
+          not P.supports_language(""))
+    check("missing language is not assumed to be English",
+          not P.supports_language(None))
+
+
 def main() -> int:
     tests = [
         test_dictionary_loads,
@@ -223,6 +235,7 @@ def main() -> int:
         test_disabling_layers,
         test_segment_checking_and_cache,
         test_empty_input,
+        test_supported_language_boundary,
     ]
     for test in tests:
         print(f"\n{test.__name__}")

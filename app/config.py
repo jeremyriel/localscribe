@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import languages
+
 APP_NAME = "Local Scribe"
 APP_SLUG = "localscribe"
 
@@ -132,6 +134,7 @@ def _f(key, label, kind, default, help="", **extra):
 SETTINGS_SCHEMA = [
     {
         "id": "engine",
+        "section": "ai",
         "title": "Engine",
         "blurb": (
             "Which Whisper model runs, and on what hardware. Changing any of "
@@ -140,7 +143,10 @@ SETTINGS_SCHEMA = [
         "fields": [
             _f("model", "Model", "model_select", "large-v3-turbo",
                "Pick from the catalogue below. Larger models are more accurate "
-               "and slower; the recommendation panel accounts for your hardware."),
+               "and slower; the recommendation panel accounts for your hardware. "
+               "Large v3 Turbo transcribes well but cannot translate to English, "
+               "and English-only models cannot translate other languages; the "
+               "table shows which models suit Translate to English."),
             _f("device", "Device", "device_select", "auto",
                "'auto' prefers CUDA when a usable GPU and cuDNN are present, "
                "otherwise CPU. Pick a specific GPU index when you have several."),
@@ -163,6 +169,7 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "decoding",
+        "section": "ai",
         "title": "Decoding",
         "blurb": (
             "How the decoder searches for the transcript. Wider searches are "
@@ -202,6 +209,7 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "tokens",
+        "section": "ai",
         "title": "Token budget and chunking",
         "blurb": (
             "Whisper's decoder has a hard 448-token context window per "
@@ -228,6 +236,7 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "quality",
+        "section": "ai",
         "title": "Quality gates",
         "blurb": (
             "Thresholds that decide when a decoded segment is untrustworthy and "
@@ -260,6 +269,7 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "vad",
+        "section": "ai",
         "title": "Voice activity detection",
         "blurb": (
             "Silero VAD trims silence before transcription. On long interviews "
@@ -288,20 +298,36 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "language",
+        "section": "ai",
         "title": "Language and vocabulary",
         "blurb": (
             "Forcing the language avoids misdetection on short or accented "
             "openings. Domain vocabulary measurably improves proper nouns."
         ),
         "fields": [
-            _f("language", "Language", "text", "auto",
-               "ISO code such as 'en', 'es' or 'zh', or 'auto' to detect from "
-               "the first 30 seconds. Forcing the correct code is more reliable "
-               "than detection on recordings that open with noise or music."),
-            _f("task", "Task", "select", "transcribe",
-               "'transcribe' keeps the spoken language. 'translate' renders "
-               "English output from non-English speech.",
-               options=["transcribe", "translate"]),
+            _f("language", "Spoken language", "language_select", "auto",
+               "The language spoken in the recordings, or 'Detect "
+               "automatically' to identify it from the first 30 seconds. "
+               "Transcripts are written in the language spoken. Forcing the "
+               "correct language is more reliable than detection on recordings "
+               "that open with noise, music or a different language. This is "
+               "the default for projects that have not chosen their own; each "
+               "project page remembers its own choice.",
+               choices=languages.choices()),
+            _f("task", "Default operation for new projects", "select", "transcribe",
+               "What a newly created project starts on. Each project page has its "
+               "own Transcribe / Translate to English choice, so changing this "
+               "never alters existing projects, and changing a project never "
+               "alters this. 'Transcribe' keeps the spoken language and is what "
+               "research transcripts normally need. 'Translate to English' "
+               "renders speech in any language as English text; it is a machine "
+               "translation, not a record of what was said, and needs a "
+               "standard multilingual model (Large v3 Turbo cannot translate).",
+               options=["transcribe", "translate"],
+               option_labels={
+                   "transcribe": "Transcribe (keep the spoken language)",
+                   "translate": "Translate to English",
+               }),
             _f("initial_prompt", "Initial prompt", "textarea", "",
                "Free text given to the decoder as prior context. Listing names, "
                "jargon and acronyms here biases spelling toward them. Projects "
@@ -316,6 +342,7 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "output",
+        "section": "ai",
         "title": "Output and captions",
         "blurb": "How transcripts and caption files are written.",
         "fields": [
@@ -363,6 +390,7 @@ SETTINGS_SCHEMA = [
     },
     {
         "id": "proofread",
+        "section": "ai",
         "title": "Proofreading",
         "blurb": (
             "Marks probable errors in the transcript editor: red for words not "
@@ -388,7 +416,23 @@ SETTINGS_SCHEMA = [
         ],
     },
     {
+        "id": "application",
+        "section": "application",
+        "title": "Editor and history",
+        "blurb": "How the transcript editor and each project's edit history behave on this computer.",
+        "fields": [
+            _f("keep_preview_audio", "Keep browser preview audio", "bool", True,
+               "Formats such as .mkv and .avi cannot play in a browser, so a "
+               "compact .m4a companion is created for the editor. Turning this "
+               "off saves disk but disables playback for those formats."),
+            _f("autosave_revisions", "Autosave revisions to keep", "slider", 20,
+               "Per-document edit history depth.",
+               min=0, max=100, step=5),
+        ],
+    },
+    {
         "id": "privacy",
+        "section": "privacy",
         "title": "Privacy and network",
         "blurb": (
             "Local Scribe makes no outbound request except a deliberate model "
@@ -406,13 +450,12 @@ SETTINGS_SCHEMA = [
                "Scribe has been released, and tells you here if so - it never "
                "downloads or installs anything on its own. Has no effect while "
                "the offline lock is on."),
-            _f("keep_preview_audio", "Keep browser preview audio", "bool", True,
-               "Formats such as .mkv and .avi cannot play in a browser, so a "
-               "compact .m4a companion is created for the editor. Turning this "
-               "off saves disk but disables playback for those formats."),
-            _f("autosave_revisions", "Autosave revisions to keep", "slider", 20,
-               "Per-document edit history depth.",
-               min=0, max=100, step=5),
+            # Earlier versions kept one backup folder for every project here. Backup
+            # folders are now per project (project page); this value is kept only so
+            # it can be offered as an explicit "use it for this project" choice.
+            _f("box_sync_destination", "Previously shared Box Sync folder", "text", "",
+               "Legacy shared folder, no longer shown. Choose a backup folder for "
+               "each project on its page.", hidden=True),
         ],
     },
 ]
@@ -471,6 +514,11 @@ def coerce_value(key, value):
             if options and text not in options:
                 return default
             return text or default
+        if kind == "language_select":
+            # Settings files written before this was a dropdown held free
+            # text, so accept names and regional tags and fall back to
+            # automatic detection rather than rejecting the whole file.
+            return languages.coerce(value)
         if kind in ("device_select", "model_select"):
             # Validated against live hardware / catalogue elsewhere; accept any
             # non-empty string here so a settings file stays loadable even if a
@@ -543,9 +591,12 @@ class SettingsStore:
             self._persist()
             return dict(self._data)
 
-    def reset(self):
+    def reset(self, keep=()):
+        """Restore defaults; ``keep`` names settings that must survive (not user-facing)."""
         with self._lock:
+            kept = {key: self._data[key] for key in keep if key in self._data}
             self._data = default_settings()
+            self._data.update(kept)
             self._persist()
             return dict(self._data)
 
@@ -595,7 +646,7 @@ def install_offline_guard() -> None:
             if not any(host == p or host.startswith(p) for p in _LOOPBACK_PREFIXES):
                 raise OfflineLockError(
                     "Offline lock is engaged: refused outbound connection to "
-                    f"{host!r}. Disable the offline lock in AI Settings if you "
+                    f"{host!r}. Disable the offline lock in Settings if you "
                     "intend to download a model."
                 )
         return _REAL_SOCKET_CONNECT(self, address)

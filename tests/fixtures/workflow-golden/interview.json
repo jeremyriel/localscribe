@@ -1,0 +1,220 @@
+{
+  "meta": {
+    "title": "Synthetic interview",
+    "filename": "synthetic-interview.wav",
+    "project": "Synthetic regression study (imported)",
+    "export_provenance": {
+      "status": "current",
+      "workflow_status": "validated",
+      "reviewer": "Revisor",
+      "validated_at": "2026-01-02T03:04:05+00:00",
+      "exported_at": "2026-01-02T03:04:05+00:00",
+      "formats": [
+        "docx",
+        "json",
+        "srt",
+        "vtt"
+      ]
+    }
+  },
+  "summary": {
+    "segments": 2,
+    "words": 7,
+    "duration": 3.0,
+    "language": "es",
+    "language_name": "Spanish",
+    "language_probability": 0.99,
+    "language_requested": "",
+    "output_language": "es",
+    "output_language_name": "Spanish",
+    "operation": "transcribe",
+    "output_status": "original",
+    "spaceless": false,
+    "rtl": false,
+    "model": "synthetic-fixture",
+    "human_edited": true,
+    "retimestamped_at": "2026-01-02T03:04:05+00:00",
+    "confidence_meaningful": true,
+    "low_confidence": 1,
+    "speakers": [
+      "Entrevistadora",
+      "Participante 01"
+    ],
+    "edited_segments": 1
+  },
+  "speakers": [
+    {
+      "id": "s1",
+      "name": "Entrevistadora",
+      "short": "E",
+      "color": "#0f766e"
+    },
+    {
+      "id": "s2",
+      "name": "Participante 01",
+      "short": "P01",
+      "color": "#9a5b00"
+    }
+  ],
+  "transcript": {
+    "schema": 3,
+    "created": "2026-01-02T03:04:05+00:00",
+    "updated": "2026-01-02T03:04:05+00:00",
+    "language": "es",
+    "language_probability": 0.99,
+    "language_requested": "",
+    "operation": "",
+    "output_check": {},
+    "duration": 3.0,
+    "model": "synthetic-fixture",
+    "engine": {
+      "name": "synthetic-fixture"
+    },
+    "stats": {},
+    "human_edited": true,
+    "retimestamped_at": "2026-01-02T03:04:05+00:00",
+    "validation": {
+      "status": "validated",
+      "reviewer": "Revisor",
+      "validated_at": "2026-01-02T03:04:05+00:00",
+      "notes": "Revisado",
+      "history": [
+        {
+          "action": "started",
+          "reviewer": "Revisor",
+          "at": "2026-01-02T03:04:05+00:00",
+          "notes": ""
+        },
+        {
+          "action": "validated",
+          "reviewer": "Revisor",
+          "at": "2026-01-02T03:04:05+00:00",
+          "notes": "Revisado"
+        },
+        {
+          "action": "exported",
+          "reviewer": "Revisor",
+          "at": "2026-01-02T03:04:05+00:00",
+          "notes": "",
+          "formats": [
+            "docx",
+            "json",
+            "srt",
+            "vtt"
+          ]
+        }
+      ]
+    },
+    "export": {
+      "status": "current",
+      "exported_at": "2026-01-02T03:04:05+00:00",
+      "formats": [
+        "docx",
+        "json",
+        "srt",
+        "vtt"
+      ],
+      "source_sha256": "4ffcea0c9e1234e72eeb7029d36c4130863507d7f3158eedaf0d6b50673c9b8f"
+    },
+    "speakers": [
+      {
+        "id": "s1",
+        "name": "Entrevistadora",
+        "short": "E",
+        "color": "#0f766e"
+      },
+      {
+        "id": "s2",
+        "name": "Participante 01",
+        "short": "P01",
+        "color": "#9a5b00"
+      }
+    ],
+    "dictionary": [],
+    "annotations": [],
+    "segments": [
+      {
+        "id": 0,
+        "start": 0.0,
+        "end": 1.2,
+        "text": "Hola, ¿cómo estás?",
+        "speaker_id": "s1",
+        "speaker": "Entrevistadora",
+        "edited": false,
+        "words": [
+          {
+            "w": "Hola,",
+            "start": 0.0,
+            "end": 0.35,
+            "prob": 0.99
+          },
+          {
+            "w": "¿cómo",
+            "start": 0.36,
+            "end": 0.72,
+            "prob": 0.97
+          },
+          {
+            "w": "estás?",
+            "start": 0.73,
+            "end": 1.2,
+            "prob": 0.98
+          }
+        ],
+        "avg_logprob": null,
+        "no_speech_prob": null,
+        "compression_ratio": null,
+        "temperature": null,
+        "review": {
+          "flagged": false,
+          "changed": true,
+          "resolved": []
+        }
+      },
+      {
+        "id": 1,
+        "start": 1.5,
+        "end": 2.75,
+        "text": "Muy bien, muchas gracias.",
+        "speaker_id": "s2",
+        "speaker": "Participante 01",
+        "edited": true,
+        "words": [
+          {
+            "w": "Muy",
+            "start": 1.5,
+            "end": 1.78,
+            "prob": 0.97
+          },
+          {
+            "w": "bien,",
+            "start": 1.79,
+            "end": 2.12,
+            "prob": 0.96
+          },
+          {
+            "w": "muchas",
+            "start": 2.12,
+            "end": 2.13,
+            "prob": 0.0
+          },
+          {
+            "w": "gracias.",
+            "start": 2.13,
+            "end": 2.75,
+            "prob": 0.98
+          }
+        ],
+        "avg_logprob": null,
+        "no_speech_prob": null,
+        "compression_ratio": null,
+        "temperature": null,
+        "review": {
+          "flagged": false,
+          "changed": true,
+          "resolved": []
+        }
+      }
+    ]
+  }
+}

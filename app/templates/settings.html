@@ -1,224 +1,14 @@
 {% extends "base.html" %}
-{% block title %}AI Settings - {{ app_name }}{% endblock %}
+{% block title %}Settings - {{ app_name }}{% endblock %}
 
-{% block content %}
-<div class="page-head">
-  <div class="grow">
-    <h1>AI Settings</h1>
-    <p class="lede">
-      Every transcription parameter Whisper accepts, with an explanation of what
-      it actually does. Defaults are sensible; change them when you have a
-      reason, and use Restore defaults if a change makes things worse.
-    </p>
-  </div>
-</div>
-
-<!-- Hardware and recommendation -->
-<div class="card">
-  <h2>This machine</h2>
-  <div class="grid grid-2">
-    <div>
-      <dl>
-        <dt>CPU</dt><dd>{{ catalog.hardware.cpu_cores }} logical cores</dd>
-        <dt>CPU precisions</dt><dd class="mono">{{ catalog.hardware.cpu_compute_types|join(', ') }}</dd>
-        <dt>GPU</dt>
-        <dd>
-          {% if catalog.hardware.gpus %}
-            {{ catalog.hardware.gpus|length }} &times; {{ catalog.hardware.gpus[0] }}
-          {% else %}none detected{% endif %}
-        </dd>
-        {% if catalog.hardware.driver_version %}
-        <dt>NVIDIA driver</dt><dd class="mono">{{ catalog.hardware.driver_version }}</dd>
-        {% endif %}
-        <dt>GPU usable</dt>
-        <dd>{% if catalog.hardware.cuda_usable %}yes{% else %}no - transcription runs on CPU{% endif %}</dd>
-        {% if catalog.hardware.apple_silicon %}
-        <dt>Unified memory</dt>
-        <dd>{% if catalog.hardware.unified_memory_gb %}{{ catalog.hardware.unified_memory_gb }} GB, shared by CPU and GPU{% else %}unknown{% endif %}</dd>
-        <dt>Apple GPU (MLX) usable</dt>
-        <dd>{% if catalog.hardware.mlx_available %}yes{% else %}no - mlx-whisper is not installed{% endif %}</dd>
-        {% endif %}
-      </dl>
-    </div>
-    <div>
-      <div class="notice notice-info">
-        <strong>Recommended: {{ catalog.recommendation.model }}
-          at {{ catalog.recommendation.compute_type }}
-          on {{ catalog.recommendation.device|upper }}</strong>
-        {{ catalog.recommendation.reason }}
-      </div>
-      {% if catalog.recommendation.alternatives %}
-      <ul class="small muted" style="margin:.6rem 0 0; padding-left:1.1rem">
-        {% for alt in catalog.recommendation.alternatives %}
-          <li><strong>{{ alt.model }}</strong> - {{ alt.when }}</li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-      <div class="row" style="margin-top:.7rem">
-        <button type="button" class="btn btn-small" id="apply-rec"
-                data-model="{{ catalog.recommendation.model }}"
-                data-compute="{{ catalog.recommendation.compute_type }}"
-                data-device="{{ catalog.recommendation.device }}">
-          Use the recommendation
-        </button>
-        <button type="button" class="btn btn-small btn-quiet" id="recheck-hw">Re-check hardware</button>
-      </div>
-    </div>
-  </div>
-
-  {% for warning in catalog.hardware.warnings %}
-    <div class="notice notice-warn" style="margin-top:.8rem">
-      {{ warning }}
-      {% if 'cuDNN' in warning or 'cuBLAS' in warning %}
-      <div class="row" style="margin-top:.6rem">
-        <button type="button" class="btn btn-small" id="install-gpu">Install GPU support</button>
-      </div>
-      {% endif %}
-    </div>
-  {% endfor %}
-  {% for note in catalog.hardware.notes %}
-    <div class="notice" style="margin-top:.8rem">{{ note }}</div>
-  {% endfor %}
-</div>
-
-<!-- Model catalogue -->
-<div class="card">
-  <h2>Models</h2>
-  <p class="card-note">
-    Weights are downloaded once into <code>models/</code> and then used
-    offline. The download is the only outbound request Local Scribe makes.
-  </p>
-
-  {% if values.offline_lock %}
-  <div class="notice notice-warn">
-    <strong>Offline lock is engaged</strong>
-    Downloads are blocked. Turn the lock off in the Privacy section below if you
-    need to fetch a model, then turn it back on.
-  </div>
-  {% endif %}
-
-  <div class="table-wrap">
-    <table class="model-table">
-      <thead>
-        <tr>
-          <th>Model</th>
-          <th>Size</th>
-          <th>Speed</th>
-          <th>Languages</th>
-          <th>Suitability</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for model in catalog.models %}
-        <tr class="{{ 'rec' if model.recommended else '' }}" data-model="{{ model.key }}">
-          <td>
-            <div class="model-name">
-              {{ model.label }}
-              {% if model.recommended %}<span class="badge badge-run">recommended</span>{% endif %}
-              {% if values.model == model.key %}<span class="badge badge-ok">selected</span>{% endif %}
-            </div>
-            <div class="model-sub mono">{{ model.key }} &middot; {{ model.params }}</div>
-          </td>
-          <td class="small nowrap">
-            {{ model.download_mb }} MB
-            {% if model.downloaded %}<div class="badge badge-ok">on disk</div>{% endif %}
-          </td>
-          <td class="small">{{ model.speed }}</td>
-          <td class="small">{{ model.languages }}</td>
-          <td class="model-note">{{ model.suitability }}</td>
-          <td class="nowrap" style="text-align:right">
-            {% if model.downloaded %}
-              {% if values.model != model.key %}
-                <button type="button" class="btn btn-small" data-act="select" data-model="{{ model.key }}">Use</button>
-              {% endif %}
-              <button type="button" class="btn btn-small btn-quiet btn-danger"
-                      data-act="delete" data-model="{{ model.key }}">Delete</button>
-            {% else %}
-              <button type="button" class="btn btn-small btn-primary"
-                      data-act="download" data-model="{{ model.key }}"
-                      {% if values.offline_lock %}disabled title="Offline lock is engaged"{% endif %}>
-                Download
-              </button>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Updates -->
-<div class="card" id="updates">
-  <h2>Updates</h2>
-  <p class="card-note">
-    Checked once when Local Scribe starts, against GitHub - the same one
-    deliberate network request the model catalogue makes, nothing is ever
-    downloaded or installed without a click here.
-  </p>
-
-  {% if values.offline_lock %}
-  <div class="notice notice-warn">
-    <strong>Offline lock is engaged</strong>
-    Update checks are disabled while it's on, the same as model downloads.
-  </div>
-  {% endif %}
-
-  <dl>
-    <dt>You have</dt><dd class="mono" id="update-current">{{ update.current }}</dd>
-    <dt>Latest known</dt>
-    <dd class="mono" id="update-latest">
-      {% if update.latest %}{{ update.latest }}{% else %}not checked yet{% endif %}
-    </dd>
-  </dl>
-
-  <div id="update-status">
-    {% if update.available %}
-      <div class="notice notice-ok">
-        <strong>Version {{ update.latest }} is available.</strong>
-        {% if is_git_checkout %}
-          Pull the latest source and restart Local Scribe to finish.
-        {% else %}
-          Download and run the new installer - it keeps your projects,
-          models, and settings, which live outside the app itself.
-        {% endif %}
-      </div>
-    {% elif update.checked %}
-      <div class="notice notice-ok">Local Scribe is up to date.</div>
-    {% endif %}
-  </div>
-
-  <div class="row" style="margin-top:.7rem">
-    <button type="button" class="btn btn-small btn-quiet" id="check-updates"
-            {% if values.offline_lock %}disabled{% endif %}>
-      Check now
-    </button>
-    {% if is_git_checkout %}
-      <button type="button" class="btn btn-small" id="apply-update"
-              {% if not update.available or values.offline_lock %}disabled{% endif %}>
-        Update now
-      </button>
-    {% else %}
-      <a class="btn btn-small" id="download-update"
-         href="{{ update.download_url or update.release_url or 'https://github.com/jeremyriel/localscribe' }}"
-         target="_blank" rel="noopener"
-         {% if not update.available %}style="display:none"{% endif %}>
-        Download the new version
-      </a>
-    {% endif %}
-  </div>
-</div>
-
-<!-- The settings form itself, generated from the schema -->
-<form id="settings-form">
-  {% for group in schema %}
-  <details class="settings-group" {% if loop.index <= 2 %}open{% endif %}>
+{% macro settings_group(group, is_open) %}
+  <details class="settings-group" id="{{ group.id }}-settings"
+           {% if is_open %}open{% endif %}>
     <summary>{{ group.title }}</summary>
     <div class="settings-body">
       <p class="settings-blurb">{{ group.blurb }}</p>
 
-      {% for field in group.fields %}
+      {% for field in group.fields if not field.hidden %}
       <div class="field" data-key="{{ field.key }}">
         <label for="f-{{ field.key }}">{{ field.label }}</label>
 
@@ -247,7 +37,14 @@
         {% elif field.kind == 'select' %}
           <select id="f-{{ field.key }}" name="{{ field.key }}" data-kind="select">
             {% for option in field.options %}
-              <option value="{{ option }}" {% if values[field.key] == option %}selected{% endif %}>{{ option }}</option>
+              <option value="{{ option }}" {% if values[field.key] == option %}selected{% endif %}>{{ (field.option_labels or {}).get(option, option) }}</option>
+            {% endfor %}
+          </select>
+
+        {% elif field.kind == 'language_select' %}
+          <select id="f-{{ field.key }}" name="{{ field.key }}" data-kind="select">
+            {% for choice in field.choices %}
+              <option value="{{ choice.value }}" {% if values[field.key] == choice.value %}selected{% endif %}>{{ choice.label }}</option>
             {% endfor %}
           </select>
 
@@ -306,6 +103,203 @@
       {% endfor %}
     </div>
   </details>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div class="grow">
+    <h1>Settings</h1>
+    <p class="lede">
+      Transcription, application and privacy options for this computer. Per-project
+      choices, including each project's backup folder, are on the project pages.
+      Defaults are sensible; use Restore defaults if a change makes things worse.
+    </p>
+  </div>
+</div>
+
+<nav class="section-nav" aria-label="Settings sections">
+  <a href="#ai-transcription">AI &amp; Transcription</a>
+  <a href="#application">Application</a>
+  <a href="#privacy-network">Privacy &amp; Network</a>
+</nav>
+
+<form id="settings-form">
+
+<section id="ai-transcription" aria-labelledby="ai-transcription-heading">
+  <h2 class="section-heading" id="ai-transcription-heading">AI &amp; Transcription</h2>
+
+  <!-- Hardware and recommendation -->
+  <div class="card">
+    <h2>This machine</h2>
+    <div class="grid grid-2">
+      <div>
+        <dl>
+          <dt>CPU</dt><dd>{{ catalog.hardware.cpu_cores }} logical cores</dd>
+          <dt>CPU precisions</dt><dd class="mono">{{ catalog.hardware.cpu_compute_types|join(', ') }}</dd>
+          <dt>GPU</dt>
+          <dd>
+            {% if catalog.hardware.gpus %}
+              {{ catalog.hardware.gpus|length }} &times; {{ catalog.hardware.gpus[0] }}
+            {% else %}none detected{% endif %}
+          </dd>
+          {% if catalog.hardware.driver_version %}
+          <dt>NVIDIA driver</dt><dd class="mono">{{ catalog.hardware.driver_version }}</dd>
+          {% endif %}
+          <dt>GPU usable</dt>
+          <dd>{% if catalog.hardware.cuda_usable %}yes{% else %}no - transcription runs on CPU{% endif %}</dd>
+          {% if catalog.hardware.apple_silicon %}
+          <dt>Unified memory</dt>
+          <dd>{% if catalog.hardware.unified_memory_gb %}{{ catalog.hardware.unified_memory_gb }} GB, shared by CPU and GPU{% else %}unknown{% endif %}</dd>
+          <dt>Apple GPU (MLX) usable</dt>
+          <dd>{% if catalog.hardware.mlx_available %}yes{% else %}no - mlx-whisper is not installed{% endif %}</dd>
+          {% endif %}
+        </dl>
+      </div>
+      <div>
+        <div class="notice notice-info">
+          <strong>Recommended: {{ catalog.recommendation.model }}
+            at {{ catalog.recommendation.compute_type }}
+            on {{ catalog.recommendation.device|upper }}</strong>
+          {{ catalog.recommendation.reason }}
+        </div>
+        {% if catalog.recommendation.alternatives %}
+        <ul class="small muted" style="margin:.6rem 0 0; padding-left:1.1rem">
+          {% for alt in catalog.recommendation.alternatives %}
+            <li><strong>{{ alt.model }}</strong> - {{ alt.when }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="row" style="margin-top:.7rem">
+          <button type="button" class="btn btn-small" id="apply-rec"
+                  data-model="{{ catalog.recommendation.model }}"
+                  data-compute="{{ catalog.recommendation.compute_type }}"
+                  data-device="{{ catalog.recommendation.device }}">
+            Use the transcription recommendation
+          </button>
+          <button type="button" class="btn btn-small btn-quiet" id="recheck-hw">Re-check hardware</button>
+        </div>
+
+        <div class="notice notice-info" style="margin-top:.9rem">
+          <strong>For Translate to English, recommended:
+            {{ catalog.recommendation_translate.model }}</strong>
+          {{ catalog.recommendation_translate.reason }}
+        </div>
+        <ul class="small muted" style="margin:.6rem 0 0; padding-left:1.1rem">
+          {% for alt in catalog.recommendation_translate.alternatives %}
+            <li><strong>{{ alt.model }}</strong> - {{ alt.when }}</li>
+          {% endfor %}
+        </ul>
+        <div class="row" style="margin-top:.7rem">
+          <button type="button" class="btn btn-small" id="apply-rec-translate"
+                  data-model="{{ catalog.recommendation_translate.model }}"
+                  data-compute="{{ catalog.recommendation_translate.compute_type }}"
+                  data-device="{{ catalog.recommendation_translate.device }}">
+            Use the translation recommendation
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {% for warning in catalog.hardware.warnings %}
+      <div class="notice notice-warn" style="margin-top:.8rem">
+        {{ warning }}
+        {% if 'cuDNN' in warning or 'cuBLAS' in warning %}
+        <div class="row" style="margin-top:.6rem">
+          <button type="button" class="btn btn-small" id="install-gpu">Install GPU support</button>
+        </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% for note in catalog.hardware.notes %}
+      <div class="notice" style="margin-top:.8rem">{{ note }}</div>
+    {% endfor %}
+  </div>
+
+  <!-- Model catalogue -->
+  <div class="card">
+    <h2>Models</h2>
+    <p class="card-note">
+      Weights are downloaded once into <code>models/</code> and then used
+      offline. The download is the only outbound request Local Scribe makes.
+      A model marked multilingual describes its Whisper capability, not validated
+      end-to-end language coverage; current proofreading is English-only.
+    </p>
+
+    {% if values.offline_lock %}
+    <div class="notice notice-warn">
+      <strong>Offline lock is engaged</strong>
+      Downloads are blocked. Turn the lock off in the Privacy section below if you
+      need to fetch a model, then turn it back on.
+    </div>
+    {% endif %}
+
+    <div class="table-wrap">
+      <table class="model-table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Size</th>
+            <th>Speed</th>
+            <th>Languages</th>
+            <th>Translate to English</th>
+            <th>Suitability</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for model in catalog.models %}
+          <tr class="{{ 'rec' if model.recommended else '' }}" data-model="{{ model.key }}">
+            <td>
+              <div class="model-name">
+                {{ model.label }}
+                {% if model.recommended %}<span class="badge badge-run">recommended</span>{% endif %}
+                {% if model.recommended_translate %}<span class="badge badge-run">recommended for translation</span>{% endif %}
+                {% if values.model == model.key %}<span class="badge badge-ok">selected</span>{% endif %}
+              </div>
+              <div class="model-sub mono">{{ model.key }} &middot; {{ model.params }}</div>
+            </td>
+            <td class="small nowrap">
+              {{ model.download_mb }} MB
+              {% if not model.downloaded %}
+              <div class="muted">Reserve ~{{ (model.recommended_free_bytes / 1000000)|round|int }} MB free</div>
+              {% endif %}
+              {% if model.downloaded %}<div class="badge badge-ok">on disk</div>{% endif %}
+            </td>
+            <td class="small">{{ model.speed }}</td>
+            <td class="small">{{ model.languages }}</td>
+            <td class="small" data-translation="{{ model.translation.level }}">
+              {% if model.translation.level == 'ok' %}Supported
+              {% elif model.translation.level == 'limited' %}Poor quality
+              {% else %}Not suitable{% endif %}
+              {% if model.translation.reason %}<div class="muted">{{ model.translation.reason }}</div>{% endif %}
+            </td>
+            <td class="model-note">{{ model.suitability }}</td>
+            <td class="nowrap" style="text-align:right">
+              {% if model.downloaded %}
+                {% if values.model != model.key %}
+                  <button type="button" class="btn btn-small" data-act="select" data-model="{{ model.key }}">Use</button>
+                {% endif %}
+                <button type="button" class="btn btn-small btn-quiet btn-danger"
+                        data-act="delete" data-model="{{ model.key }}">Delete</button>
+              {% else %}
+                <button type="button" class="btn btn-small btn-primary"
+                        data-act="download" data-model="{{ model.key }}"
+                        data-download-bytes="{{ model.download_bytes }}"
+                        data-required-bytes="{{ model.recommended_free_bytes }}"
+                        {% if values.offline_lock %}disabled title="Offline lock is engaged"{% endif %}>
+                  Download
+                </button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% for group in schema if group.section == 'ai' %}
+  {{ settings_group(group, loop.first) }}
   {% endfor %}
 
   <!-- Advanced raw parameter passthrough -->
@@ -329,17 +323,124 @@
       </div>
     </div>
   </details>
+</section>
 
-  <div class="sticky-actions">
-    <button type="submit" class="btn btn-primary">Save settings</button>
-    <span class="save-state" id="settings-state"></span>
-    <div class="spacer"></div>
-    <button type="button" class="btn btn-quiet btn-danger" id="reset-settings">Restore defaults</button>
+<section id="application" aria-labelledby="application-heading">
+  <h2 class="section-heading" id="application-heading">Application</h2>
+
+  <section class="card" id="local-health">
+    <div class="row">
+      <h2 class="grow">Local health checks</h2>
+      <button type="button" class="btn btn-small btn-quiet" id="recheck-health">
+        Re-check
+      </button>
+    </div>
+    <p class="card-note">
+      Checks inspect this computer's storage, data folders, selected model files,
+      and Python runtime only. They make no outbound requests or send data off
+      this computer.
+    </p>
+    <ul class="health-checks">
+      {% for check in health.checks %}
+      <li>
+        <span class="badge
+          {% if check.status == 'ok' %}badge-ok
+          {% elif check.status == 'warning' %}badge-warn
+          {% else %}badge-err{% endif %}">{{ check.status }}</span>
+        <span><strong>{{ check.label }}</strong> — {{ check.detail }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <!-- Updates -->
+  <div class="card" id="updates">
+    <h2>Updates</h2>
+    <p class="card-note">
+      Checked once when Local Scribe starts, against GitHub - the same one
+      deliberate network request the model catalogue makes, nothing is ever
+      downloaded or installed without a click here.
+    </p>
+
+    {% if values.offline_lock %}
+    <div class="notice notice-warn">
+      <strong>Offline lock is engaged</strong>
+      Update checks are disabled while it's on, the same as model downloads.
+    </div>
+    {% endif %}
+
+    <dl>
+      <dt>You have</dt><dd class="mono" id="update-current">{{ update.current }}</dd>
+      <dt>Latest known</dt>
+      <dd class="mono" id="update-latest">
+        {% if update.latest %}{{ update.latest }}{% else %}not checked yet{% endif %}
+      </dd>
+    </dl>
+
+    <div id="update-status">
+      {% if update.available %}
+        <div class="notice notice-ok">
+          <strong>Version {{ update.latest }} is available.</strong>
+          {% if is_git_checkout %}
+            Pull the latest source and restart Local Scribe to finish.
+          {% else %}
+            Download and run the new installer - it keeps your projects,
+            models, and settings, which live outside the app itself.
+          {% endif %}
+        </div>
+      {% elif update.checked %}
+        <div class="notice notice-ok">Local Scribe is up to date.</div>
+      {% endif %}
+    </div>
+
+    <div class="row" style="margin-top:.7rem">
+      <button type="button" class="btn btn-small btn-quiet" id="check-updates"
+              {% if values.offline_lock %}disabled{% endif %}>
+        Check now
+      </button>
+      {% if is_git_checkout %}
+        <button type="button" class="btn btn-small" id="apply-update"
+                {% if not update.available or values.offline_lock %}disabled{% endif %}>
+          Update now
+        </button>
+      {% else %}
+        <a class="btn btn-small" id="download-update"
+           href="{{ update.download_url or update.release_url or 'https://github.com/jeremyriel/localscribe' }}"
+           target="_blank" rel="noopener"
+           {% if not update.available %}style="display:none"{% endif %}>
+          Download the new version
+        </a>
+      {% endif %}
+    </div>
   </div>
+
+  {% for group in schema if group.section == 'application' %}
+  {{ settings_group(group, true) }}
+  {% endfor %}
+</section>
+
+<section id="privacy-network" aria-labelledby="privacy-network-heading">
+  <h2 class="section-heading" id="privacy-network-heading">Privacy &amp; Network</h2>
+  <p class="card-note">
+    The content-free activity record, storage locations and diagnostics are on
+    <a href="/privacy">Activity &amp; Diagnostics</a>. Backup folders are chosen per
+    project, on each project page.
+  </p>
+  {% for group in schema if group.section == 'privacy' %}
+  {{ settings_group(group, true) }}
+  {% endfor %}
+</section>
+
 </form>
+
+<div class="sticky-actions" id="settings-actions" role="region" aria-label="Save or restore settings">
+  <button type="submit" form="settings-form" class="btn btn-primary">Save settings</button>
+  <span class="save-state" id="settings-state" role="status" aria-live="polite"></span>
+  <div class="spacer"></div>
+  <button type="button" class="btn btn-danger" id="reset-settings">Restore defaults</button>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script>window.SETTINGS_VALUES = {{ values|tojson }};</script>
 <script src="/static/js/settings.js"></script>
 {% endblock %}

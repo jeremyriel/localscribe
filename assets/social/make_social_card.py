@@ -88,8 +88,9 @@ def main() -> int:
 
     tag_fnt = font(BODY_FONT, 33)
     tagline = (
-        "Free and open-source AI-based automated audio transcription, "
-        "captioning, and easy transcript editing software for researchers."
+        "Free and open-source AI-based automated audio transcription in many "
+        "languages, English translation, captioning, and easy transcript "
+        "review and editing software for researchers."
     )
     lines = wrap_to_width(d, tagline, tag_fnt, text_max_width)
     y = 268
