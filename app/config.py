@@ -347,10 +347,13 @@ SETTINGS_SCHEMA = [
         "blurb": "How transcripts and caption files are written.",
         "fields": [
             _f("formats", "Export formats", "multiselect",
-               ["txt", "md", "docx", "vtt", "srt", "json"],
+               ["txt", "md", "docx", "vtt", "srt", "json", "csv", "xlsx"],
                "Written into each document's outputs/ folder after "
-               "transcription and after every re-timestamp.",
-               options=["txt", "md", "docx", "vtt", "srt", "json"]),
+               "transcription and after every re-timestamp. csv and xlsx "
+               "are a review report: one row per segment with confidence "
+               "and Review Mode flags, plus blank columns for a team to "
+               "review together in a spreadsheet.",
+               options=["txt", "md", "docx", "vtt", "srt", "json", "csv", "xlsx"]),
             _f("vtt_max_chars", "Caption max characters per line", "slider", 42,
                "Captions are split at word boundaries, never mid-word. 32 to 42 "
                "is the broadcast convention.",

@@ -1,4 +1,4 @@
-"""Transcript exporters: .txt, .md, .docx, .vtt, .srt, .json.
+"""Transcript exporters: .txt, .md, .docx, .vtt, .srt, .json, .csv, .xlsx.
 
 Every writer is a pure projection of ``transcript.json``, so the caption files
 and the prose files can never disagree about what was said or when. Re-running
@@ -12,14 +12,17 @@ happened to end a segment.
 
 from __future__ import annotations
 
+import copy
+import csv
 import json
 import re
 from pathlib import Path
 
-from . import languages
+from . import languages, review
 from .transcript import (
     DEFAULT_PAUSE_GAP,
     LOW_CONFIDENCE,
+    _prob_of,
     full_text,
     segment_text,
     speaker_by_id,
@@ -31,7 +34,7 @@ from .transcript import (
     word_count,
 )
 
-ALL_FORMATS = ("txt", "md", "docx", "vtt", "srt", "json")
+ALL_FORMATS = ("txt", "md", "docx", "vtt", "srt", "json", "csv", "xlsx")
 
 
 def rendered_turns(doc: dict, settings: dict) -> list:
@@ -783,6 +786,230 @@ def write_docx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) 
     return dest
 
 
+# ---------------------------------------------------------------------------
+# Review report (.csv / .xlsx)
+# ---------------------------------------------------------------------------
+# A spreadsheet with one row per segment, so a team can split up and review a
+# transcript together in Excel or Google Sheets instead of each person
+# re-running it locally. The machine columns come straight from the transcript
+# and the Review Mode queue; the last four columns are left blank for people.
+# This is an export only: decisions made in the sheet are not read back.
+
+REVIEW_COLUMNS = (
+    "Segment",
+    "Start",
+    "End",
+    "Speaker",
+    "Text",
+    "Needs review",
+    "Review flags",
+    "Resolved in Local Scribe",
+    "Low-confidence words",
+    "Lowest word confidence",
+    "Reviewer",
+    "Decision",
+    "Corrected text",
+    "Comments",
+)
+REVIEWER_COLUMNS = ("Reviewer", "Decision", "Corrected text", "Comments")
+REVIEW_DECISIONS = ("Correct as is", "Needs correction", "Unsure / discuss")
+
+# Spreadsheet apps run a cell that starts with one of these as a formula, so
+# transcript text such as "=yes" or "-- pause" is written as plain text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def review_rows(doc: dict) -> list:
+    """One dict per segment, in time order, keyed by REVIEW_COLUMNS.
+
+    ``Lowest word confidence`` is a 0-1 float (or None when the segment has
+    no timed words); the writers decide how to display it.
+    """
+    # queue_items() repairs each segment's review state in place, and an
+    # export must never change the transcript it describes.
+    working = copy.deepcopy(doc)
+    by_segment: dict = {}
+    for item in review.queue_items(working):
+        by_segment.setdefault(item["segment_id"], []).append(item)
+
+    rows = []
+    for seg in working.get("segments") or []:
+        seg_id = int(seg.get("id", 0))
+        items = by_segment.get(seg_id, [])
+        open_labels = [i["label"] for i in items if not i["resolved"]]
+        done_labels = [i["label"] for i in items if i["resolved"]]
+
+        low_words = []
+        lowest = None
+        for word in seg.get("words") or []:
+            prob = _prob_of(word)
+            lowest = prob if lowest is None else min(lowest, prob)
+            if prob < LOW_CONFIDENCE:
+                token = (word.get("w") or "").strip()
+                if not token:
+                    continue
+                # A human-corrected word is stored with confidence 0.0.
+                if prob == 0.0 and seg.get("edited"):
+                    low_words.append(f"{token} (corrected)")
+                else:
+                    low_words.append(f"{token} ({prob * 100:.0f}%)")
+
+        rows.append({
+            "Segment": seg_id,
+            "Start": stamp(seg.get("start") or 0.0),
+            "End": stamp(seg.get("end") or 0.0),
+            "Speaker": (seg.get("speaker") or "").strip(),
+            "Text": segment_text(seg),
+            "Needs review": "Yes" if open_labels else "No",
+            "Review flags": "; ".join(open_labels),
+            "Resolved in Local Scribe": "; ".join(done_labels),
+            "Low-confidence words": ", ".join(low_words),
+            "Lowest word confidence": lowest,
+            "Reviewer": "",
+            "Decision": "",
+            "Corrected text": "",
+            "Comments": "",
+        })
+    return rows
+
+
+def _sheet_text(value) -> str:
+    text = "" if value is None else str(value)
+    if text.startswith(_FORMULA_PREFIXES):
+        return "'" + text
+    return text
+
+
+def write_csv(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -> Path:
+    """Review report as CSV.
+
+    Written as UTF-8 with a byte-order mark so Excel opens non-English text
+    correctly on a double-click.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(REVIEW_COLUMNS)
+        for row in review_rows(doc):
+            cells = []
+            for column in REVIEW_COLUMNS:
+                value = row[column]
+                if column == "Lowest word confidence":
+                    cells.append("" if value is None else f"{value * 100:.0f}%")
+                elif column == "Segment":
+                    cells.append(str(value))
+                else:
+                    cells.append(_sheet_text(value))
+            writer.writerow(cells)
+    return dest
+
+
+def write_xlsx(doc: dict, dest: Path, settings: dict, meta: dict | None = None) -> Path:
+    """Review report as an Excel workbook.
+
+    Sheet "Review" holds the rows, with segments that still need review
+    highlighted, a frozen header, filters, and a drop-down for the decision.
+    Sheet "About" records what the file was made from and how to use it.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    meta = meta or {}
+    rows = review_rows(doc)
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Review"
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill("solid", fgColor="D9E2EC")
+    reviewer_fill = PatternFill("solid", fgColor="E6F4EA")
+    flag_fill = PatternFill("solid", fgColor="FFF2CC")
+    wrap = Alignment(wrap_text=True, vertical="top")
+
+    widths = {
+        "Segment": 9, "Start": 10, "End": 10, "Speaker": 14, "Text": 60,
+        "Needs review": 9, "Review flags": 22, "Resolved in Local Scribe": 22,
+        "Low-confidence words": 30, "Lowest word confidence": 12,
+        "Reviewer": 14, "Decision": 18, "Corrected text": 50, "Comments": 40,
+    }
+
+    for col, column in enumerate(REVIEW_COLUMNS, start=1):
+        cell = sheet.cell(row=1, column=col, value=column)
+        cell.font = header_font
+        cell.fill = reviewer_fill if column in REVIEWER_COLUMNS else header_fill
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+        sheet.column_dimensions[get_column_letter(col)].width = widths[column]
+
+    for r, row in enumerate(rows, start=2):
+        flagged = row["Needs review"] == "Yes"
+        for col, column in enumerate(REVIEW_COLUMNS, start=1):
+            value = row[column]
+            cell = sheet.cell(row=r, column=col)
+            if column == "Segment":
+                cell.value = value
+                cell.alignment = Alignment(horizontal="center", vertical="top")
+            elif column == "Lowest word confidence":
+                cell.value = value
+                cell.number_format = "0%"
+            else:
+                cell.value = "" if value is None else str(value)
+                # Keep text such as "=yes" from being stored as a formula.
+                cell.data_type = "s"
+            if column != "Segment":
+                cell.alignment = wrap
+            if flagged and column not in REVIEWER_COLUMNS:
+                cell.fill = flag_fill
+
+    sheet.freeze_panes = "B2"
+    last_col = get_column_letter(len(REVIEW_COLUMNS))
+    sheet.auto_filter.ref = f"A1:{last_col}{max(1, len(rows) + 1)}"
+
+    if rows:
+        decision_col = get_column_letter(REVIEW_COLUMNS.index("Decision") + 1)
+        choices = DataValidation(
+            type="list",
+            formula1='"' + ",".join(REVIEW_DECISIONS) + '"',
+            allow_blank=True,
+        )
+        sheet.add_data_validation(choices)
+        choices.add(f"{decision_col}2:{decision_col}{len(rows) + 1}")
+
+    about = book.create_sheet("About")
+    lines = [("Local Scribe review report", "")]
+    for entry in _plain_header(doc, meta):
+        label, _, value = entry.partition(": ")
+        lines.append((label, value))
+    open_rows = sum(1 for row in rows if row["Needs review"] == "Yes")
+    lines += [
+        ("Segments needing review", f"{open_rows} of {len(rows)}"),
+        ("Low-confidence threshold", f"words below {LOW_CONFIDENCE * 100:.0f}% model confidence"),
+        ("", ""),
+        ("How to use", "Highlighted rows still have open items in Review Mode. "
+                       "Filter 'Needs review' to Yes to see only those."),
+        ("", "Fill in Reviewer, Decision, Corrected text and Comments. "
+             "Corrections are not imported back automatically: apply them "
+             "in the Local Scribe editor."),
+        ("Data security", "This file contains the full transcript text. Keep it "
+                          "in storage approved for this data."),
+    ]
+    for r, (label, value) in enumerate(lines, start=1):
+        a = about.cell(row=r, column=1, value=label)
+        b = about.cell(row=r, column=2, value=value)
+        a.data_type = b.data_type = "s"
+        a.font = header_font
+        a.alignment = b.alignment = wrap
+    about["A1"].font = Font(bold=True, size=14)
+    about.column_dimensions["A"].width = 26
+    about.column_dimensions["B"].width = 90
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    book.save(str(dest))
+    return dest
+
+
 WRITERS = {
     "txt": write_txt,
     "md": write_md,
@@ -790,6 +1017,8 @@ WRITERS = {
     "vtt": write_vtt,
     "srt": write_srt,
     "json": write_json,
+    "csv": write_csv,
+    "xlsx": write_xlsx,
 }
 
 

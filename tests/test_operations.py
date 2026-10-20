@@ -641,7 +641,7 @@ def test_job_records_what_happened():
     check("the status line says English translation",
           "English translation ready for review" in record["status_detail"], record["status_detail"])
     check("exports are named as a translation",
-          outputs(slug, doc_id) == sorted(f"translation-en.{e}" for e in ("docx", "json", "md", "srt", "txt", "vtt")),
+          outputs(slug, doc_id) == sorted(f"translation-en.{e}" for e in ("csv", "docx", "json", "md", "srt", "txt", "vtt", "xlsx")),
           str(outputs(slug, doc_id)))
 
     doc_id = projects.add_document(slug, "b.wav", data=b"RIFF synthetic")["id"]
