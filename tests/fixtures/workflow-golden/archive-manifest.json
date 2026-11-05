@@ -1,7 +1,7 @@
 {
   "format": "localscribe-project",
   "format_version": 2,
-  "app_version": "1.01.2",
+  "app_version": "1.02",
   "exported": "2026-01-02T03:04:05+00:00",
   "slug": "synthetic-regression-study-2",
   "project_id": "synthetic-project-id",
@@ -66,8 +66,8 @@
     },
     {
       "path": "project.json",
-      "size_bytes": 675,
-      "sha256": "4316f1953ce802b9db299ca172e1915eeae285cd57d09bad75d9b277934e225d"
+      "size_bytes": 673,
+      "sha256": "fe2847f096d3e95089548c93a5c56779bce61f49fdccdba409c72b44cad468ad"
     }
   ]
 }

@@ -519,6 +519,8 @@ versioning tied to commit counts:
 - **1.01.1, 1.01.2, ...** — small fixes and tweaks on top of 1.01. A build
   number appears only once there's something to append it to; a release
   with no build suffix (like 1.01) is the first of that minor version.
+- **1.02** — added multilingual transcription and Translate to English, Box
+  Sync backups, recovery safeguards, and the transcript-first editor layout.
 
 The running version is in `VERSION` at the repository root, and shown on
 the **About** page and in the app's window title/console banner.
