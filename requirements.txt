@@ -30,6 +30,8 @@ pywebview>=5.0
 
 # Exports
 python-docx>=1.1.0,<2.0
+# Review report spreadsheet (.xlsx)
+openpyxl>=3.1,<4.0
 
 # Icon rasterisation (png/ico generation)
 pillow>=10.0.0

@@ -15,6 +15,35 @@ button. Resolving a review item records that segment as reviewed. Editing
 segment text or speaker assignment clears prior resolutions and places the
 segment in the changed-since-validation queue.
 
+## Review report for team review
+
+Local Scribe can write the review queue out as a spreadsheet, so a team can
+split up and review one transcript together in Excel or Google Sheets instead
+of everyone running it on their own computer. Turn on `csv` and/or `xlsx`
+under **Settings > Output and captions > Export formats**; the files then
+appear under **Download** with the other exports and are regenerated on every
+re-export or re-timestamp.
+
+Each row is one segment, in time order, with its start and end time, speaker,
+text, whether it still needs review, the open Review Mode flags (low
+confidence, unassigned speaker, flag, changed since validation), any items
+already resolved in Local Scribe, the low-confidence words with their scores,
+and the lowest word confidence in the segment. Words below 55% model
+confidence count as low confidence, the same threshold the editor uses.
+Possible-artefact findings come from the editor's background proofreading
+sweep and are not included. The last four columns, **Reviewer**, **Decision**,
+**Corrected text** and **Comments**, are left blank for reviewers.
+
+The `.xlsx` version highlights rows that still need review, freezes the header,
+turns on filters, offers a drop-down for **Decision**, and adds an **About**
+sheet describing the source file and how to use the report. The `.csv` version
+is UTF-8 with a byte-order mark so Excel opens non-English text correctly.
+
+The report is export only: decisions and corrections entered in the
+spreadsheet are not read back, so apply corrections in the editor. The report
+contains the full transcript text, so keep shared copies in storage approved
+for the data (for example, your institution's approved cloud storage).
+
 ## Editor layout
 
 The transcript editor puts the transcript first: a compact header (with links

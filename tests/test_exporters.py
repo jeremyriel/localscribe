@@ -15,15 +15,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import default_settings
 from app.exporters import (
+    REVIEW_COLUMNS,
     build_cues,
     export_all,
     fits,
+    review_rows,
     srt_time,
     stamp,
     vtt_time,
     wrap_lines,
 )
-from app.transcript import apply_edits, make_segment, make_word, new_document
+from app.transcript import (
+    apply_edits,
+    make_segment,
+    make_word,
+    new_document,
+    normalise,
+)
 
 FAILURES: list = []
 
@@ -348,6 +356,97 @@ def test_pause_markers_can_be_switched_off():
           txt.count("A:") == 1, f'counted {txt.count("A:")}')
 
 
+def build_review_doc():
+    """Three segments: one clean, one low-confidence, one flagged with a
+    formula-like line and a resolved low-confidence item."""
+    doc = new_document(duration=12, model="test", language="en",
+                       language_probability=0.99)
+    doc["segments"] = [
+        make_segment(0, 0, 2, "All clear here.",
+                     [make_word("All", 0, 0.5, 0.97), make_word("clear", 0.5, 1, 0.96),
+                      make_word("here.", 1, 2, 0.98)], speaker="Interviewer"),
+        make_segment(1, 2, 5, "We used the Delphi method.",
+                     [make_word("We", 2, 2.4, 0.95), make_word("used", 2.4, 2.8, 0.93),
+                      make_word("the", 2.8, 3, 0.97), make_word("Delphi", 3, 3.8, 0.31),
+                      make_word("method.", 3.8, 5, 0.9)], speaker="P01"),
+        make_segment(2, 5, 8, "=SUM(A1) said 女士",
+                     [make_word("=SUM(A1)", 5, 6, 0.4), make_word("said", 6, 7, 0.9),
+                      make_word("女士", 7, 8, 0.92)], speaker=""),
+    ]
+    doc = normalise(doc)
+    doc["segments"][2]["review"]["flagged"] = True
+    doc["segments"][2]["review"]["resolved"] = ["low_confidence"]
+    return doc
+
+
+def test_review_report():
+    import csv
+    import json as _json
+
+    doc = build_review_doc()
+    before = _json.dumps(doc, sort_keys=True)
+    rows = review_rows(doc)
+    check("review export leaves the transcript untouched",
+          _json.dumps(doc, sort_keys=True) == before)
+    check("one row per segment", len(rows) == 3, str(len(rows)))
+    check("clean segment does not need review", rows[0]["Needs review"] == "No")
+    check("low-confidence segment needs review",
+          rows[1]["Needs review"] == "Yes" and "Low confidence" in rows[1]["Review flags"])
+    check("low-confidence word listed with its score",
+          rows[1]["Low-confidence words"] == "Delphi (31%)", rows[1]["Low-confidence words"])
+    check("lowest confidence recorded", abs(rows[1]["Lowest word confidence"] - 0.31) < 1e-9)
+    check("resolved items are reported separately",
+          rows[2]["Resolved in Local Scribe"] == "Low confidence"
+          and "Low confidence" not in rows[2]["Review flags"], str(rows[2]))
+    check("flag and unassigned speaker stay open",
+          "Flag" in rows[2]["Review flags"] and "Unassigned speaker" in rows[2]["Review flags"])
+    check("reviewer columns start blank",
+          all(rows[0][c] == "" for c in ("Reviewer", "Decision", "Corrected text", "Comments")))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        settings = default_settings()
+        written = export_all(doc, Path(tmp), settings, formats=["csv", "xlsx"])
+        check("csv and xlsx written without errors",
+              all(not str(v).startswith("error") for v in written.values()), str(written))
+
+        raw = Path(written["csv"]).read_bytes()
+        check("csv starts with a UTF-8 BOM for Excel", raw.startswith(b"\xef\xbb\xbf"))
+        with open(written["csv"], encoding="utf-8-sig", newline="") as handle:
+            table = list(csv.reader(handle))
+        check("csv header matches the column list", tuple(table[0]) == REVIEW_COLUMNS)
+        check("csv has a row per segment", len(table) == 4, str(len(table)))
+        text_col = REVIEW_COLUMNS.index("Text")
+        check("csv keeps formula-like text inert",
+              table[3][text_col].startswith("'="), table[3][text_col])
+        check("csv keeps non-English text", "女士" in table[3][text_col])
+        check("csv shows confidence as a percentage",
+              table[2][REVIEW_COLUMNS.index("Lowest word confidence")] == "31%")
+
+        from openpyxl import load_workbook
+        book = load_workbook(written["xlsx"])
+        check("xlsx has Review and About sheets", book.sheetnames == ["Review", "About"],
+              str(book.sheetnames))
+        sheet = book["Review"]
+        header = tuple(c.value for c in sheet[1])
+        check("xlsx header matches the column list", header == REVIEW_COLUMNS)
+        check("xlsx has a row per segment", sheet.max_row == 4, str(sheet.max_row))
+        cell = sheet.cell(row=4, column=text_col + 1)
+        check("xlsx stores formula-like text as text",
+              cell.data_type == "s" and cell.value == "=SUM(A1) said 女士",
+              f"{cell.data_type} {cell.value!r}")
+        check("xlsx header is frozen", sheet.freeze_panes == "B2")
+        check("xlsx offers a decision drop-down",
+              len(sheet.data_validations.dataValidation) == 1)
+        flagged_fill = sheet.cell(row=3, column=1).fill.fgColor.rgb
+        clean_fill = sheet.cell(row=2, column=1).fill.fgColor.rgb
+        check("xlsx highlights rows needing review", flagged_fill != clean_fill,
+              f"{flagged_fill} vs {clean_fill}")
+
+        everything = export_all(doc, Path(tmp), settings)
+        check("default export includes the review report",
+              "csv" in everything and "xlsx" in everything, str(list(everything)))
+
+
 def main() -> int:
     tests = [
         test_speaker_name_not_repeated_after_a_pause,
@@ -360,6 +459,7 @@ def main() -> int:
         test_vtt_is_wellformed,
         test_segment_without_words_still_captioned,
         test_exports_reflect_edits,
+        test_review_report,
     ]
     for test in tests:
         print(f"\n{test.__name__}")
